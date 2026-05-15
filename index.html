@@ -253,18 +253,23 @@ class HairStrand {
     }
   }
   step(dt, gravityScale=1, windX=0) {
-    // Verlet integrate (with optional horizontal wind — opposes player motion = trails behind)
+    // Verlet integrate. Higher damping (0.992) keeps motion alive longer →
+    // hair flows "สลวย" instead of going limp instantly.
+    // Per-point falloff: tip points get slightly more wind = more lateral sway.
     const G = 0.5 * gravityScale;
-    for (const p of this.points) {
+    const N = this.points.length;
+    for (let i = 0; i < N; i++) {
+      const p = this.points[i];
       if (p.fixed) continue;
-      const vx = (p.x - p.ox) * 0.985 + windX;
-      const vy = (p.y - p.oy) * 0.985 + G;
+      const tipFactor = 0.6 + 0.6 * (i / (N - 1));   // 0.6 root → 1.2 tip
+      const vx = (p.x - p.ox) * 0.992 + windX * tipFactor;
+      const vy = (p.y - p.oy) * 0.992 + G;
       p.ox = p.x; p.oy = p.y;
       p.x += vx; p.y += vy;
     }
     // Constrain (multiple iterations for stability)
     for (let iter = 0; iter < 6; iter++) {
-      for (let i = 0; i < this.points.length - 1; i++) {
+      for (let i = 0; i < N - 1; i++) {
         const a = this.points[i], b = this.points[i+1];
         const dx = b.x - a.x, dy = b.y - a.y;
         const d = Math.sqrt(dx*dx + dy*dy) || 0.001;
@@ -335,8 +340,12 @@ class GameScene extends Phaser.Scene {
     this.keys = this.input.keyboard.addKeys('A,D,W,SPACE,SHIFT,R,F');
     bindTouch();
 
-    // ---- Death zone watcher ----
+    // ---- Death zone watcher + ground contact tracking (proper coyote/buffer) ----
     this.matter.world.on('collisionstart', (e) => this.onCollide(e));
+    this.matter.world.on('collisionend',   (e) => this.onCollideEnd(e));
+
+    // ---- Dust particles (footstep / landing puffs) ----
+    this.initDust();
 
     // ---- Chapter intro card ----
     this.introActive = true;
@@ -761,11 +770,68 @@ class GameScene extends Phaser.Scene {
   onCollide(event) {
     for (const pair of event.pairs) {
       const a = pair.bodyA, b = pair.bodyB;
-      // Player ground touch
       if ((a.label === 'player' && b.label === 'ground') ||
           (b.label === 'player' && a.label === 'ground')) {
-        if (this.player) this.player.onGround = true;
+        if (this.player) {
+          this.player.onGround = true;
+          this.player.groundContacts = (this.player.groundContacts || 0) + 1;
+        }
       }
+    }
+  }
+  onCollideEnd(event) {
+    for (const pair of event.pairs) {
+      const a = pair.bodyA, b = pair.bodyB;
+      if ((a.label === 'player' && b.label === 'ground') ||
+          (b.label === 'player' && a.label === 'ground')) {
+        if (this.player) {
+          this.player.groundContacts = Math.max(0, (this.player.groundContacts || 1) - 1);
+          if (this.player.groundContacts === 0) this.player.onGround = false;
+        }
+      }
+    }
+  }
+
+  /* ----------------------------------------------------------------------
+   * DUST PARTICLES — footstep + landing puffs
+   * Soft pale-cyan motes that drift up and fade. Pure Graphics (no atlas).
+   * -------------------------------------------------------------------- */
+  initDust() {
+    this.dustParticles = [];
+    this.dustGfx = this.add.graphics().setDepth(8);
+  }
+  spawnDust(x, y, count = 6) {
+    for (let i = 0; i < count; i++) {
+      const ang = Math.PI + (Math.random() - 0.5) * Math.PI * 0.7;
+      const sp  = 0.5 + Math.random() * 1.4;
+      this.dustParticles.push({
+        x, y,
+        vx: Math.cos(ang) * sp + (Math.random() - 0.5) * 0.6,
+        vy: Math.sin(ang) * sp - 0.2,
+        life: 0,
+        maxLife: 0.6 + Math.random() * 0.5,
+        size: 1.4 + Math.random() * 2.0,
+      });
+    }
+  }
+  updateDust(dt) {
+    if (!this.dustGfx) return;
+    const g = this.dustGfx;
+    g.clear();
+    for (let i = this.dustParticles.length - 1; i >= 0; i--) {
+      const p = this.dustParticles[i];
+      p.life += dt;
+      if (p.life >= p.maxLife) { this.dustParticles.splice(i, 1); continue; }
+      p.vy += 0.04;       // light gravity
+      p.vx *= 0.96;
+      p.vy *= 0.97;
+      p.x += p.vx;
+      p.y += p.vy;
+      const t = p.life / p.maxLife;
+      const a = (1 - t) * 0.55;
+      const r = p.size * (1 + t * 0.6);
+      g.fillStyle(0xc8e0d8, a);
+      g.fillCircle(p.x, p.y, r);
     }
   }
 
@@ -798,6 +864,7 @@ class GameScene extends Phaser.Scene {
     }
 
     this.updateAtmosphere(delta);
+    this.updateDust(delta / 1000);
   }
 
   updateAtmosphere(delta) {
@@ -1165,23 +1232,36 @@ class Player {
     this.walkPhase = 0;
     this.input = { left:false, right:false, jump:false, run:false, ragdoll:false };
     this.onGround = false;
+    this.groundContacts = 0;
     this.airTime = 0;
     this.speedX = 0;
     this.fallVel = 0;
     this.ragdolled = false;
     this.alive = true;
 
-    // ---- Physics body (capsule for normal mode) ----
-    this.capsule = this.matter.add.rectangle(x, y, 16, 60, {
-      chamfer: { radius: 8 },
+    // ---- Game-feel state (industry-standard platformer) ----
+    this.coyoteTime = 0;        // grace window after walking off ledge (seconds)
+    this.jumpBuffer = 0;        // grace window when pressing jump before landing
+    this.jumpHeld   = false;    // for variable jump height (cut velocity on release)
+    this.justJumped = false;    // for jump SFX dedup
+    // Squash & stretch (visual only — multiplies body draw scale)
+    this.scaleX = 1;
+    this.scaleY = 1;
+    this.scaleXTarget = 1;
+    this.scaleYTarget = 1;
+
+    // ---- Physics body — slimmer capsule (girl, not adult) ----
+    // Width 14 (was 16), height 56 (was 60). Slightly lower mass.
+    this.capsule = this.matter.add.rectangle(x, y, 14, 56, {
+      chamfer: { radius: 7 },
       friction: 0.2,
       frictionAir: 0.01,
-      mass: 4,
+      mass: 3.2,
       label: 'player',
       inertia: Infinity,
     });
 
-    // Camera follow target — invisible sprite that we move smoothly to capsule center
+    // Camera follow target
     this.followTarget = scene.add.zone(x, y, 1, 1);
     scene.physics?.world?.enable?.(this.followTarget);
 
@@ -1189,20 +1269,33 @@ class Player {
     this.gfx = scene.add.graphics().setDepth(10);
     this.lanternGlow = scene.add.graphics().setDepth(9);
 
-    // ---- Hair (Verlet) ----
-    // BACK strands are long (extend past pelvis so they're visible flowing behind).
-    // SIDE strands are mid-length (frame the face/shoulders).
-    // CROWN wisps are short (whispy top hair).
-    // Drawn BEHIND body in render order — only the parts beyond body silhouette show.
+    // ---- Hair (Verlet) — 14 strands for proper "ผมขาวยาวสลวย" feel ----
+    // BACK (longest): 4 strands flowing past pelvis/hips — main silhouette element
+    // SIDE: 4 strands framing shoulders/cheeks
+    // FRONT BANGS: 4 short strands across forehead
+    // CROWN: 2 short wisps on top
+    // Render order: drawn BEHIND body, only off-body parts visible.
     this.hair = [
-      new HairStrand(14, 84, -8, -10, 2.8), // long back-of-head strand → flows past pelvis
-      new HairStrand(12, 70, -6, -5, 2.3),  // back centre — second long strand
-      new HairStrand(10, 50, -11, -1, 1.9), // left side bang
-      new HairStrand(10, 50,  9, -1, 1.9),  // right side bang
-      new HairStrand(7,  26, -3, -13, 1.5), // top crown wisp left
-      new HairStrand(7,  26,  4, -13, 1.5), // top crown wisp right
+      // BACK — long flowing (segments=18, length=110, drops below hips)
+      new HairStrand(18, 115, -7,  -8, 3.0),
+      new HairStrand(18, 108, -3,  -9, 2.8),
+      new HairStrand(18, 110,  3,  -9, 2.8),
+      new HairStrand(18, 105,  7,  -8, 3.0),
+      // SIDE — mid-length (frames shoulders)
+      new HairStrand(13,  64, -10, -3, 2.2),
+      new HairStrand(13,  64,  10, -3, 2.2),
+      new HairStrand(11,  48, -11,  3, 1.9),
+      new HairStrand(11,  48,  11,  3, 1.9),
+      // FRONT BANGS — short across forehead
+      new HairStrand(7,   22, -7, -14, 1.6),
+      new HairStrand(7,   22, -2, -15, 1.6),
+      new HairStrand(7,   22,  3, -15, 1.6),
+      new HairStrand(7,   22,  7, -14, 1.6),
+      // CROWN wisps
+      new HairStrand(6,   18, -2, -17, 1.3),
+      new HairStrand(6,   18,  3, -17, 1.3),
     ];
-    this.hair.forEach(s => s.anchor(x, y - 40));
+    this.hair.forEach(s => s.anchor(x, y - 36));
   }
 
   destroy() {
@@ -1233,42 +1326,78 @@ class Player {
     }
     this.ragdollDebugLast = this.input.ragdoll;
 
-    // ---- Movement ----
+    // ---- Movement (horizontal) ----
     const targetSpeed = (this.input.left ? -1 : 0) + (this.input.right ? 1 : 0);
     const maxSpeed = this.input.run ? 6.0 : 3.4;
-    this.speedX += (targetSpeed * maxSpeed - this.speedX) * 0.18;
+    // Faster acceleration on ground, slower in air (industry standard)
+    const accel = this.onGround ? 0.18 : 0.08;
+    this.speedX += (targetSpeed * maxSpeed - this.speedX) * accel;
     M.Body.setVelocity(this.capsule, { x: this.speedX, y: this.capsule.velocity.y });
 
     if (targetSpeed !== 0) this.facing = targetSpeed;
 
-    // ---- Jump ----
-    if (this.input.jump && this.onGround && !this.jumpHeld) {
+    // ---- Game-feel timers (Celeste / Hollow Knight standard) ----
+    // Coyote time — player can still jump for ~100ms after walking off a ledge
+    const COYOTE = 0.10;
+    const BUFFER = 0.12;     // jump-press grace window before landing
+    if (this.onGround) this.coyoteTime = COYOTE;
+    else this.coyoteTime = Math.max(0, this.coyoteTime - dt);
+
+    // Jump buffer — record press timestamp, consume on landing
+    const jumpPressedNow = this.input.jump && !this.jumpWasHeld;
+    if (jumpPressedNow) this.jumpBuffer = BUFFER;
+    else this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    this.jumpWasHeld = this.input.jump;
+
+    // ---- Jump (consumes buffer + coyote) ----
+    if (this.jumpBuffer > 0 && this.coyoteTime > 0 && !this.justJumped) {
       M.Body.setVelocity(this.capsule, { x: this.capsule.velocity.x, y: -10.5 });
       this.onGround = false;
-      this.jumpHeld = true;
+      this.coyoteTime = 0;
+      this.jumpBuffer = 0;
+      this.justJumped = true;
+      this.airTime = 0.001;             // ensures we count as airborne
+      this.scaleXTarget = 0.78; this.scaleYTarget = 1.22;  // STRETCH on jump
       this.scene.sfx('jump');
+      // dust puff at feet
+      this.scene.spawnDust?.(this.x, this.y + 28, 6);
     }
-    if (!this.input.jump) this.jumpHeld = false;
 
-    // air time tracking (for fall ragdoll)
+    // Variable jump height — release jump early to cut upward velocity
+    if (!this.input.jump && this.justJumped && this.capsule.velocity.y < -5) {
+      M.Body.setVelocity(this.capsule, { x: this.capsule.velocity.x, y: this.capsule.velocity.y * 0.45 });
+    }
+    // Reset jump latch once we're falling, ready for next press
+    if (this.capsule.velocity.y > 0) this.justJumped = false;
+
+    // ---- Air time + landing ----
     if (!this.onGround) {
       this.airTime += dt;
     } else {
-      // Detect hard landing → ragdoll
       const fallV = this.capsule.velocity.y;
+      // Hard landing → ragdoll
       if (this.airTime > 0.65 && fallV > 8) {
         this.triggerRagdoll({ x: this.capsule.velocity.x * 0.5, y: 0 });
         return;
       }
-      // Land SFX (only when actually fell, not just standing still)
-      if (this.airTime > 0.18) this.scene.sfx('land');
+      // Soft land — SFX + dust + SQUASH
+      if (this.airTime > 0.18) {
+        this.scene.sfx('land');
+        const intensity = Math.min(1, this.airTime / 0.6);
+        this.scaleXTarget = 1 + 0.22 * intensity;   // SQUASH wider
+        this.scaleYTarget = 1 - 0.18 * intensity;   // SQUASH shorter
+        this.scene.spawnDust?.(this.x, this.y + 28, Math.round(8 + intensity * 10));
+      }
       this.airTime = 0;
     }
 
-    // After velocity update, ground flag resets next collision (collisionend would clear)
-    // We use a simpler heuristic: if y velocity is near zero and we haven't moved up, we're grounded.
+    // Squash/stretch return-to-rest (springy)
+    this.scaleXTarget = lerp(this.scaleXTarget, 1, dt * 7);
+    this.scaleYTarget = lerp(this.scaleYTarget, 1, dt * 7);
+    this.scaleX = lerp(this.scaleX, this.scaleXTarget, dt * 18);
+    this.scaleY = lerp(this.scaleY, this.scaleYTarget, dt * 18);
 
-    // walk phase + footstep SFX on each step zero-crossing
+    // Walk phase + footstep SFX/dust on each step zero-crossing
     const moving = Math.abs(this.speedX) > 0.4;
     const prevPhase = this.walkPhase;
     if (moving) {
@@ -1276,30 +1405,33 @@ class Player {
     } else {
       this.walkPhase += dt * 1.4;
     }
-    // detect a foot hitting the ground (sin crosses 0 going downward, modulo PI)
     if (moving && this.onGround) {
       const a = Math.floor(prevPhase / Math.PI);
       const b = Math.floor(this.walkPhase / Math.PI);
-      if (b !== a) this.scene.sfx('step');
+      if (b !== a) {
+        this.scene.sfx('step');
+        if (this.input.run) this.scene.spawnDust?.(this.x - this.facing * 6, this.y + 28, 3);
+      }
     }
 
-    // sync canonical pose centre
+    // sync pose centre
     this.x = this.capsule.position.x;
     this.y = this.capsule.position.y;
 
-    // camera follow target
+    // camera follow target — looks ahead in movement direction
     this.followTarget.x = this.x + this.facing * 30;
     this.followTarget.y = this.y;
 
-    // hair — anchored on crown; flows down via verlet, trails behind on movement
-    const head = { x: this.x + this.facing * 1, y: this.y - 32 };
-    // wind = opposite to motion direction → hair trails behind player
-    const windX = -this.speedX * 0.18;
-    this.hair.forEach((s, i) => {
+    // Hair — anchor on crown, flow via verlet. Wind opposes motion AND adds
+    // gentle ambient sway so hair never goes fully still.
+    const head = { x: this.x + this.facing * 1, y: this.y - 30 };
+    const ambientSway = Math.sin(this.scene.time.now * 0.0008) * 0.18;
+    const windX = -this.speedX * 0.22 + ambientSway;
+    this.hair.forEach((s) => {
       const ax = head.x + s.offsetX * this.facing;
       const ay = head.y + s.offsetY;
       s.anchor(ax, ay);
-      s.step(dt, 2.2, windX);
+      s.step(dt, 2.0, windX);
     });
 
     this.draw();
@@ -1413,11 +1545,26 @@ class Player {
     const phase = this.walkPhase;
     const moving = Math.abs(this.speedX) > 0.4;
 
+    // ----- Girl proportions (was generic adult) -----
+    // Total height target ~70px (was ~80). Smaller head ratio gives "young" read.
+    // Body axis points (relative to capsule center y):
+    //   head center  : y - 30  (was y - 32)
+    //   shoulder line: y - 18
+    //   waist        : y + 4   (slim, was y + 8)
+    //   hip          : y + 14
+    //   knee         : y + 24
+    //   foot         : y + 34  (was y + 36)
+    const HEAD_Y    = y - 30;
+    const SHOULDER  = y - 18;
+    const WAIST_Y   = y + 4;
+    const HIP_Y     = y + 14;
+    const FOOT_Y    = y + 34;
+
     // walk-cycle parameters
-    const stepAmp = moving ? (this.input.run ? 16 : 12) : 0;
-    const liftAmp = moving ? (this.input.run ? 9 : 6)   : 0;
-    const armAmp  = moving ? (this.input.run ? 14 : 10) : 4;
-    const bobAmp  = moving ? (this.input.run ? 3.5 : 2.2) : 0.8;
+    const stepAmp = moving ? (this.input.run ? 14 : 10) : 0;
+    const liftAmp = moving ? (this.input.run ? 8 : 5)   : 0;
+    const armAmp  = moving ? (this.input.run ? 10 : 7)  : 3;
+    const bobAmp  = moving ? (this.input.run ? 3.0 : 1.8) : 0.6;
 
     const legAphase = phase;
     const legBphase = phase + Math.PI;
@@ -1432,72 +1579,91 @@ class Player {
     const bob = Math.abs(Math.sin(phase * 2)) * bobAmp - bobAmp * 0.5;
     const tilt = (this.speedX / 6) * 0.05;
 
-    // ---- Legs (drawn first, behind torso) ----
-    this.drawLeg(g, x - 3, y + 12,   x - 3 + legBfwd * f * 0.4, y + 24,   x - 3 + legBfwd * f, y + 36 - legBlift);
-    this.drawLeg(g, x + 3, y + 12,   x + 3 + legAfwd * f * 0.4, y + 24,   x + 3 + legAfwd * f, y + 36 - legAlift);
+    // Apply squash/stretch around feet (anchor at foot line so head bobs not feet)
+    g.save();
+    g.translateCanvas(x, FOOT_Y);
+    g.scaleCanvas(this.scaleX, this.scaleY);
+    g.translateCanvas(-x, -FOOT_Y);
 
-    // ---- Pelvis lump ----
-    g.fillRoundedRect(x - 9, y + 8, 18, 10, 4);
+    g.fillStyle(0x000000, 1);
 
-    // ---- Torso ----
+    // ---- Legs (slimmer — was 5.5/4.5/3.6, now 4.0/3.4/2.8) ----
+    this.drawLeg(g, x - 2.5, HIP_Y,   x - 2.5 + legBfwd * f * 0.4, y + 24,   x - 2.5 + legBfwd * f, FOOT_Y - legBlift);
+    this.drawLeg(g, x + 2.5, HIP_Y,   x + 2.5 + legAfwd * f * 0.4, y + 24,   x + 2.5 + legAfwd * f, FOOT_Y - legAlift);
+
+    // ---- Skirt (slightly fuller — main "girl" silhouette cue) ----
+    g.beginPath();
+    g.moveTo(x - 9, WAIST_Y);
+    g.lineTo(x + 9, WAIST_Y);
+    g.lineTo(x + 13, HIP_Y + 6);
+    g.lineTo(x - 13, HIP_Y + 6);
+    g.closePath();
+    g.fillPath();
+    // skirt edge wisps (asymmetric, hints at hem motion)
+    const hem = Math.sin(phase * 1.3) * 1.5;
+    g.beginPath();
+    g.moveTo(x - 13, HIP_Y + 6);
+    g.lineTo(x - 11, HIP_Y + 9 + hem);
+    g.lineTo(x - 9,  HIP_Y + 6);
+    g.closePath();
+    g.fillPath();
+    g.beginPath();
+    g.moveTo(x + 9,  HIP_Y + 6);
+    g.lineTo(x + 11, HIP_Y + 9 - hem);
+    g.lineTo(x + 13, HIP_Y + 6);
+    g.closePath();
+    g.fillPath();
+
+    // ---- Torso (slim, narrows at waist for girl silhouette) ----
     g.save();
     g.translateCanvas(x, y - bob);
     g.rotateCanvas(tilt);
-    // trapezoidal torso (narrower at bottom)
     g.beginPath();
-    g.moveTo(-9, -22);
-    g.lineTo(9, -22);
-    g.lineTo(11, 8);
-    g.lineTo(-11, 8);
+    g.moveTo(-7, -16);   // shoulder L (narrower than before, was -9)
+    g.lineTo( 7, -16);   // shoulder R
+    g.lineTo( 6,   0);   // waist R (cinched, was 11)
+    g.lineTo(-6,   0);   // waist L
     g.closePath();
     g.fillPath();
-    // dress flare (skirt) — Limbo + Thai costume hint
-    g.beginPath();
-    g.moveTo(-11, 8);
-    g.lineTo(11, 8);
-    g.lineTo(13, 18);
-    g.lineTo(-13, 18);
-    g.closePath();
-    g.fillPath();
+    // small bust hint (tiny rounded breast curve — keeps "girl" not "boy")
+    g.fillCircle(-3, -8, 2.4);
+    g.fillCircle( 3, -8, 2.4);
     g.restore();
 
-    // ---- Arms ----
-    const torsoTopY = y - bob - 22;
-    const sLY = y - bob - 18;
-    const sRY = y - bob - 18;
-    this.drawArm(g, x - 9, sLY,   x - 9 + armBfwd * f * 0.4, y - 6,   x - 9 + armBfwd * f, y + 6);
-    this.drawArm(g, x + 9, sRY,   x + 9 + armAfwd * f * 0.4, y - 6,   x + 9 + armAfwd * f, y + 6);
+    // ---- Arms (slimmer: 3.2/2.6/2.2 was 4.0/3.4/2.8) ----
+    this.drawArm(g, x - 7, SHOULDER,  x - 7 + armBfwd * f * 0.4, y - 4,  x - 7 + armBfwd * f, y + 8);
+    this.drawArm(g, x + 7, SHOULDER,  x + 7 + armAfwd * f * 0.4, y - 4,  x + 7 + armAfwd * f, y + 8);
 
-    // ---- Lantern in front hand (right hand if facing right) ----
-    const lh = (f === 1) ? { x: x + 9 + armAfwd, y: y + 6 } : { x: x - 9 + armBfwd * -1, y: y + 6 };
+    // ---- Lantern in front hand ----
+    const lh = (f === 1) ? { x: x + 7 + armAfwd, y: y + 8 } : { x: x - 7 - armBfwd, y: y + 8 };
     this.drawLantern(lh.x, lh.y);
 
-    // ---- Head ----
+    // ---- Head (smaller — 9.5 was 11; gives younger ratio) ----
     const headX = x;
-    const headY = y - bob - 32;
-    g.fillCircle(headX, headY, 11);
-    // small jaw line bump (a tiny Limbo-style chin notch)
-    g.fillCircle(headX + f * 4, headY + 5, 4);
+    const headY = HEAD_Y - bob;
+    g.fillCircle(headX, headY, 9.5);
+    // softer chin (was hard 4-radius lump → now subtle)
+    g.fillCircle(headX + f * 2.5, headY + 5, 3.2);
+    // neck (thin, makes head sit on shoulders cleanly)
+    g.fillRect(headX - 2, headY + 7, 4, 4);
 
-    // ---- Eyes (glowing RED — Limbo + Thai folk-horror style) ----
-    // Tuned for camera zoom 1.75 — keep dots tight, soft halo
-    // outer halo
-    g.fillStyle(0xff0000, 0.16);
-    g.fillCircle(headX + f * 3, headY - 1, 4.5);
-    g.fillCircle(headX - f * 2, headY - 1, 4.0);
-    // mid glow
-    g.fillStyle(0xff2424, 0.45);
-    g.fillCircle(headX + f * 3, headY - 1, 2.4);
-    g.fillCircle(headX - f * 2, headY - 1, 2.1);
-    // bright red core
-    g.fillStyle(0xff1a1a, 1);
-    g.fillCircle(headX + f * 3, headY - 1, 1.4);
-    g.fillCircle(headX - f * 2, headY - 1, 1.2);
-    // tiny inner highlight (gives the eye a "wet" / hot look)
-    g.fillStyle(0xffe0a0, 0.95);
-    g.fillCircle(headX + f * 3, headY - 1.2, 0.5);
-    g.fillCircle(headX - f * 2, headY - 1.2, 0.45);
+    // ---- Eyes — pale ghostly silver (NOT red demon eyes) ----
+    // Very subtle: small cool-white glow, NO halo bigger than 3px.
+    // Reads as "ghostly/spirit girl" not "predator monster".
+    const eyeY = headY - 0.5;
+    const eyeOffsetX = f * 2.2;
+    const eyeOffsetX2 = -f * 1.8;
+    // soft cyan-white halo (very faint)
+    g.fillStyle(0xc8e0ff, 0.18);
+    g.fillCircle(headX + eyeOffsetX, eyeY, 2.6);
+    g.fillCircle(headX + eyeOffsetX2, eyeY, 2.4);
+    // pale silver-white core
+    g.fillStyle(0xf0f5ff, 0.88);
+    g.fillCircle(headX + eyeOffsetX, eyeY, 1.0);
+    g.fillCircle(headX + eyeOffsetX2, eyeY, 0.9);
     g.fillStyle(0x000000, 1);
+
+    g.restore();   // close squash/stretch transform
   }
 
   drawRagdoll(g) {
@@ -1601,9 +1767,9 @@ class Player {
   }
 
   drawHair(g) {
-    // Glow underlay
+    // Wide outer glow — gives the hair a moonlit halo (key character cue)
     for (const s of this.hair) {
-      g.lineStyle(7, 0xfff5e0, 0.18);
+      g.lineStyle(s.thickness * 3.5, 0xc8e0ff, 0.10);
       g.beginPath();
       s.points.forEach((p, i) => {
         if (i === 0) g.moveTo(p.x, p.y);
@@ -1611,9 +1777,9 @@ class Player {
       });
       g.strokePath();
     }
-    // Hair core (white/bone)
+    // Mid glow (warm bone-white)
     for (const s of this.hair) {
-      g.lineStyle(s.thickness, 0xfff8e8, 1);
+      g.lineStyle(s.thickness * 1.8, 0xfff5e0, 0.32);
       g.beginPath();
       s.points.forEach((p, i) => {
         if (i === 0) g.moveTo(p.x, p.y);
@@ -1621,11 +1787,24 @@ class Player {
       });
       g.strokePath();
     }
-    // Small white tip dots (gives painterly feel)
+    // Hair core — tapered (root thicker than tip via per-segment redraw)
+    for (const s of this.hair) {
+      const N = s.points.length;
+      for (let i = 0; i < N - 1; i++) {
+        const t = i / (N - 1);
+        const w = s.thickness * (1 - t * 0.55);   // tip ~45% of root width
+        g.lineStyle(w, 0xfff8e8, 1);
+        g.beginPath();
+        g.moveTo(s.points[i].x,   s.points[i].y);
+        g.lineTo(s.points[i+1].x, s.points[i+1].y);
+        g.strokePath();
+      }
+    }
+    // Soft tip dots — "painterly hair end" feel
     for (const s of this.hair) {
       const last = s.points[s.points.length - 1];
-      g.fillStyle(0xfff8e8, 1);
-      g.fillCircle(last.x, last.y, s.thickness * 0.7);
+      g.fillStyle(0xfff8e8, 0.9);
+      g.fillCircle(last.x, last.y, s.thickness * 0.45);
     }
   }
 }
