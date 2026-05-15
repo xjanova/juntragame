@@ -1,0 +1,1677 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>แม่หมอจันทรา · Maemo Chanthra — บทที่ ๑</title>
+<meta name="description" content="การผจญภัยในดินแดนหลังความตาย — เกมไซด์สโครลล์มืดสไตล์ Limbo" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Charm:wght@400;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+<style>
+  :root{
+    --ink:#07100f; --night:#0b1c1e; --teal:#103a3b; --teal2:#1a5957;
+    --moss:#2c6b54; --ember:#ff7a1a; --lantern:#ffb05a;
+    --bone:#e9dfc7; --blood:#7a1212;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;background:#000;color:var(--bone);
+    font-family:'Cormorant Garamond',serif;overflow:hidden;
+    -webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none}
+  #game{position:fixed;inset:0}
+  #game canvas{display:block;width:100%!important;height:100%!important}
+
+  /* ============ HUD ============ */
+  #hud{position:fixed;inset:0;pointer-events:none;z-index:10;
+    font-family:'Cinzel',serif;color:rgba(233,223,199,.55);font-size:11px;letter-spacing:.32em;
+    text-transform:uppercase}
+  #chapterLabel{position:absolute;top:24px;left:50%;transform:translateX(-50%);
+    padding:6px 18px;border:1px solid rgba(255,176,90,.18);border-radius:1px;
+    background:rgba(7,16,15,.45);backdrop-filter:blur(4px);
+    transition:opacity .8s ease;opacity:0}
+  #chapterLabel.show{opacity:1}
+  #backBtn{position:absolute;top:18px;left:18px;width:36px;height:36px;
+    border:1px solid rgba(255,176,90,.18);border-radius:50%;
+    background:rgba(7,16,15,.45);color:rgba(233,223,199,.7);font-size:18px;
+    pointer-events:auto;cursor:pointer;backdrop-filter:blur(4px);
+    display:none;align-items:center;justify-content:center;font-family:inherit;
+    transition:all .25s ease}
+  #backBtn:hover{border-color:#ffb05a;color:#ffb05a}
+  #backBtn.show{display:flex}
+  #hint{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+    color:rgba(255,176,90,.55);font-size:10px;letter-spacing:.4em;
+    transition:opacity 1.2s ease;opacity:0;text-align:center;line-height:1.7}
+  #hint.show{opacity:1}
+  #hint span{color:rgba(255,176,90,.85)}
+
+  /* ============ MENU ============ */
+  #menu{position:fixed;inset:0;z-index:20;
+    display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
+    padding:0 8vw;
+    background:radial-gradient(120% 80% at 60% 60%, #1a1530 0%, #0a0612 50%, #000 100%);
+    transition:opacity .9s ease, transform .9s ease}
+  #menu.gone{opacity:0;transform:scale(1.06);pointer-events:none}
+  #menu .menu-bg{position:absolute;inset:0;background-image:url('assets/banners/ghost-standing-1.webp');
+    background-size:cover;background-position:60% center;opacity:.62;
+    /* hide left side (where marketing text is baked in) — focus mask on character at right */
+    mask-image:linear-gradient(to right, transparent 0%, transparent 30%, #000 55%, #000 80%, transparent 100%);
+    -webkit-mask-image:linear-gradient(to right, transparent 0%, transparent 30%, #000 55%, #000 80%, transparent 100%)}
+  #menu .menu-bg-cover{position:absolute;inset:0;
+    background:linear-gradient(to right, #0a0612 0%, rgba(10,6,18,.85) 30%, rgba(10,6,18,.05) 55%, transparent 70%, rgba(10,6,18,.6) 100%)}
+  #menu .menu-grain{position:absolute;inset:0;pointer-events:none;mix-blend-mode:overlay;opacity:.35;
+    background-image:radial-gradient(rgba(255,255,255,.04) 1px,transparent 1px),
+                     radial-gradient(rgba(0,0,0,.25) 1px,transparent 1px);
+    background-size:3px 3px,5px 5px;background-position:0 0,1px 2px}
+  #menu .menu-vignette{position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(60% 60% at 50% 55%, transparent 0%, rgba(0,0,0,.55) 70%, #000 100%)}
+  #menu-content{position:relative;z-index:2;max-width:560px}
+  .eyebrow{font-family:'Cinzel',serif;font-weight:500;font-size:11px;letter-spacing:.5em;
+    color:#ffb05a;text-transform:uppercase;margin-bottom:14px;display:flex;align-items:center;gap:14px}
+  .eyebrow::before{content:"";width:32px;height:1px;background:linear-gradient(to right,transparent,#ff7a1a)}
+  #menu h1{font-family:'Cinzel',serif;font-weight:900;font-size:clamp(56px,8.5vw,120px);
+    line-height:.92;letter-spacing:-.01em;color:#e9dfc7;margin-bottom:8px}
+  #menu .sub{font-family:'Charm',serif;font-style:italic;font-size:clamp(28px,3.4vw,46px);
+    color:#ff9a40;line-height:1.1;margin-bottom:26px}
+  #menu p.lead{font-size:18px;line-height:1.7;color:rgba(233,223,199,.78);margin-bottom:34px;
+    max-width:480px}
+  #menu p.lead::first-letter{font-family:'Cinzel',serif;font-size:42px;float:left;
+    line-height:.85;padding:6px 10px 0 0;color:#ffb05a;font-weight:700}
+  .btn{display:inline-flex;align-items:center;gap:14px;padding:14px 32px;
+    background:linear-gradient(to bottom, #ff8a30, #c45200);color:#1a0500;
+    font-family:'Cinzel',serif;font-weight:700;font-size:13px;letter-spacing:.32em;
+    text-transform:uppercase;border:none;cursor:pointer;
+    box-shadow:0 0 24px rgba(255,140,40,.35),inset 0 1px 0 rgba(255,220,180,.4);
+    transition:transform .2s ease, box-shadow .2s ease}
+  .btn:hover{transform:translateY(-1px);box-shadow:0 0 36px rgba(255,140,40,.55)}
+  .btn .arrow{font-size:18px;letter-spacing:0}
+  .menu-tags{display:flex;gap:34px;margin-top:38px;font-family:'Cinzel',serif;
+    font-size:10px;letter-spacing:.42em;color:rgba(233,223,199,.45);text-transform:uppercase}
+  .menu-tags div span{display:block;color:#ff9a40;margin-bottom:4px;font-weight:700}
+
+  /* ============ CHAPTER INTRO CARD ============ */
+  #introCard{position:fixed;inset:0;z-index:15;
+    display:none;flex-direction:column;justify-content:center;align-items:center;
+    background:radial-gradient(60% 60% at 50% 50%, transparent 30%, rgba(0,0,0,.85) 100%);
+    text-align:center;padding:0 24px;
+    transition:opacity 1.4s ease}
+  #introCard.show{display:flex;opacity:1}
+  #introCard.gone{opacity:0;pointer-events:none}
+  #introCard .ic-eyebrow{font-family:'Cinzel',serif;font-size:11px;letter-spacing:.6em;
+    color:#ffb05a;margin-bottom:22px;text-transform:uppercase}
+  #introCard h2{font-family:'Charm',serif;font-style:italic;font-weight:700;
+    font-size:clamp(40px,6vw,76px);color:#e9dfc7;margin-bottom:24px;line-height:1.05}
+  #introCard p{font-size:clamp(15px,1.6vw,18px);color:rgba(233,223,199,.7);
+    max-width:540px;line-height:1.8;margin-bottom:28px;font-style:italic}
+  #introCard .prompt{font-family:'Cinzel',serif;font-size:11px;letter-spacing:.4em;
+    color:rgba(255,176,90,.55);text-transform:uppercase;
+    animation:pulse 2s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.4}50%{opacity:.85}}
+
+  /* ============ DEATH OVERLAY ============ */
+  #deathOverlay{position:fixed;inset:0;z-index:12;background:#000;
+    opacity:0;pointer-events:none;transition:opacity 1.3s ease}
+  #deathOverlay.on{opacity:1}
+
+  /* ============ TOUCH CONTROLS (mobile) ============ */
+  #touch{position:fixed;inset:auto 0 0 0;height:120px;z-index:8;display:none;
+    pointer-events:none}
+  #touch.show{display:block}
+  .tc{position:absolute;bottom:24px;width:60px;height:60px;border-radius:50%;
+    border:1px solid rgba(255,176,90,.35);background:rgba(7,16,15,.45);
+    display:flex;align-items:center;justify-content:center;color:rgba(233,223,199,.7);
+    font-family:'Cinzel',serif;font-size:14px;backdrop-filter:blur(4px);
+    pointer-events:auto;-webkit-tap-highlight-color:transparent}
+  .tc.left{left:20px}
+  .tc.right{left:96px}
+  .tc.jump{right:20px}
+  .tc.run{right:96px}
+  .tc.active{background:rgba(255,140,40,.35);border-color:#ffb05a;color:#ffe5c0}
+
+  @media (max-width:980px){
+    #menu{padding:0 6vw}
+    .menu-tags{gap:18px}
+    .menu-tags div{font-size:9px;letter-spacing:.3em}
+  }
+</style>
+</head>
+<body>
+
+<div id="game"></div>
+
+<div id="hud">
+  <div id="chapterLabel">บทที่ ๑ · ตื่นในภพใหม่</div>
+  <button id="backBtn" aria-label="กลับเมนู">←</button>
+  <div id="hint"><span>← →</span> เดิน &nbsp;&nbsp;<span>SHIFT</span> วิ่ง &nbsp;&nbsp;<span>SPACE</span> กระโดด</div>
+</div>
+
+<div id="introCard">
+  <div class="ic-eyebrow">PROLOGUE · บทที่ ๑</div>
+  <h2>ตื่นในภพใหม่</h2>
+  <p>คืนนั้นแสงโคมดับลงพร้อมกัน เธอลืมตาขึ้นในป่าหมอกที่ไม่เคยเห็น<br/>
+  เสียงกระซิบดังจากทุกทิศ — และในมือของเธอ ตะเกียงดวงสุดท้ายยังคงลุกอยู่</p>
+  <div class="prompt">— กดปุ่มใดก็ได้เพื่อเริ่มเดิน —</div>
+</div>
+
+<div id="deathOverlay"></div>
+
+<div id="menu">
+  <div class="menu-bg"></div>
+  <div class="menu-bg-cover"></div>
+  <div class="menu-vignette"></div>
+  <div class="menu-grain"></div>
+  <div id="menu-content">
+    <div class="eyebrow">A Journey Through The Afterlife</div>
+    <h1>CHANTHRA</h1>
+    <div class="sub">การผจญภัยในดินแดนหลังความตาย</div>
+    <p class="lead">แม่หมอจันทรา หมอผีผู้เคยปัดเป่าวิญญาณให้ชาวบ้านมาทั้งชีวิต คืนหนึ่งเธอสิ้นลมในพิธีกรรมสุดท้าย และตื่นขึ้นอีกครั้งในดินแดนหลังความตาย ที่ซึ่งวิญญาณทุกดวงที่เธอเคยช่วย — และเคยพลาด — รอเธออยู่</p>
+    <button class="btn" id="startBtn">
+      <span>เข้าเล่นบทที่ ๑</span>
+      <span class="arrow">›</span>
+    </button>
+    <div class="menu-tags">
+      <div><span>ATMOSPHERIC</span>Side-Scroll</div>
+      <div><span>FOLK</span>Thai Horror</div>
+      <div><span>DEMO</span>Chapter I</div>
+    </div>
+  </div>
+</div>
+
+<div id="touch">
+  <div class="tc left" data-key="left">‹</div>
+  <div class="tc right" data-key="right">›</div>
+  <div class="tc run" data-key="run">⚡</div>
+  <div class="tc jump" data-key="jump">↑</div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================================
+ * MAEMO CHANTHRA — บทที่ ๑: ตื่นในภพใหม่
+ * Phaser 3 + Matter.js · vertical slice
+ * ========================================================================= */
+
+const M = Phaser.Physics.Matter.Matter;
+const TAU = Math.PI * 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const rand = (a, b) => a + Math.random() * (b - a);
+const irand = (a, b) => Math.floor(rand(a, b));
+const choice = a => a[Math.floor(Math.random() * a.length)];
+
+/* ---------- mulberry32 (seeded RNG so trees are deterministic) ---------- */
+function mulberry32(seed) {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------- Touch input ---------- */
+const TOUCH = { left:false, right:false, jump:false, run:false };
+function bindTouch() {
+  if (!('ontouchstart' in window)) return;
+  document.getElementById('touch').classList.add('show');
+  document.querySelectorAll('.tc').forEach(el => {
+    const key = el.dataset.key;
+    const press = e => { e.preventDefault(); TOUCH[key] = true;  el.classList.add('active'); };
+    const rel   = e => { e.preventDefault(); TOUCH[key] = false; el.classList.remove('active'); };
+    el.addEventListener('touchstart', press, {passive:false});
+    el.addEventListener('touchend',   rel,   {passive:false});
+    el.addEventListener('touchcancel',rel,   {passive:false});
+  });
+}
+
+/* ============================================================================
+ * VERLET HAIR — flowing white hair attached to head
+ * ========================================================================= */
+class HairStrand {
+  constructor(segments, length, offsetX, offsetY, thickness=2.2) {
+    this.points = [];
+    this.restLen = length / segments;
+    this.offsetX = offsetX;
+    this.offsetY = offsetY;
+    this.thickness = thickness;
+    for (let i = 0; i < segments; i++) {
+      this.points.push({ x:0, y:0, ox:0, oy:0, fixed:i===0 });
+    }
+  }
+  anchor(x, y) {
+    const head = this.points[0];
+    head.x = x; head.y = y; head.ox = x; head.oy = y;
+    if (this.points[1] && !this.points[1].x) {
+      // initialize chain hanging below anchor
+      for (let i = 1; i < this.points.length; i++) {
+        this.points[i].x = x;
+        this.points[i].y = y + i * this.restLen;
+        this.points[i].ox = this.points[i].x;
+        this.points[i].oy = this.points[i].y;
+      }
+    }
+  }
+  step(dt, gravityScale=1, windX=0) {
+    // Verlet integrate (with optional horizontal wind — opposes player motion = trails behind)
+    const G = 0.5 * gravityScale;
+    for (const p of this.points) {
+      if (p.fixed) continue;
+      const vx = (p.x - p.ox) * 0.985 + windX;
+      const vy = (p.y - p.oy) * 0.985 + G;
+      p.ox = p.x; p.oy = p.y;
+      p.x += vx; p.y += vy;
+    }
+    // Constrain (multiple iterations for stability)
+    for (let iter = 0; iter < 6; iter++) {
+      for (let i = 0; i < this.points.length - 1; i++) {
+        const a = this.points[i], b = this.points[i+1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d = Math.sqrt(dx*dx + dy*dy) || 0.001;
+        const diff = (d - this.restLen) / d;
+        if (!a.fixed) { a.x += dx * diff * 0.5; a.y += dy * diff * 0.5; }
+        if (!b.fixed) { b.x -= dx * diff * 0.5; b.y -= dy * diff * 0.5; }
+      }
+    }
+  }
+}
+
+/* ============================================================================
+ * BOOT SCENE — load banner art for menu
+ * ========================================================================= */
+class BootScene extends Phaser.Scene {
+  constructor() { super('Boot'); }
+  preload() {
+    // Banner artwork (used for menu / chapter intro / ending)
+    // We don't use these as in-game sprites — only as menu hero
+  }
+  create() {
+    this.scene.start('Game');
+  }
+}
+
+/* ============================================================================
+ * GAME SCENE — Chapter I: ตื่นในภพใหม่
+ * ========================================================================= */
+class GameScene extends Phaser.Scene {
+  constructor() { super('Game'); }
+
+  create() {
+    this.W = this.scale.width;
+    this.H = this.scale.height;
+    this.worldEnd = 5400;             // total scene length in pixels
+    this.groundY = this.H - 100;      // baseline ground
+    this.respawnX = 200;
+    this.cameras.main.setBackgroundColor('#000000');
+
+    // Matter world bounds (extended to scene length)
+    this.matter.world.setBounds(0, -200, this.worldEnd, this.H + 800, 64, true, true, false, true);
+    this.matter.world.setGravity(0, 1.0);
+
+    // ---- Build static world geometry (ground segments + pits + cliffs) ----
+    this.buildLevel();
+
+    // ---- Build painterly parallax (4 layers, baked to RenderTexture once) ----
+    this.buildParallax();
+
+    // ---- Player ----
+    this.player = new Player(this, this.respawnX, this.groundY - 80);
+
+    // ---- Atmosphere (fog drift, fireflies, mist particles) ----
+    this.buildAtmosphere();
+
+    // ---- Camera follow ----
+    this.cameras.main.setBounds(0, 0, this.worldEnd, this.H);
+    this.cameras.main.startFollow(this.player.followTarget, true, 0.08, 0.05);
+    this.cameras.main.setDeadzone(120, 80);
+    this.cameras.main.followOffset.set(0, -40);
+    this.cameras.main.setZoom(1.75);  // closer / more cinematic — character reads big
+
+    // ---- Color grade (vignette + warm-cool tint via overlay graphics) ----
+    this.buildPostFX();
+
+    // ---- Input ----
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.keys = this.input.keyboard.addKeys('A,D,W,SPACE,SHIFT,R,F');
+    bindTouch();
+
+    // ---- Death zone watcher ----
+    this.matter.world.on('collisionstart', (e) => this.onCollide(e));
+
+    // ---- Chapter intro card ----
+    this.introActive = true;
+    document.getElementById('introCard').classList.add('show');
+    document.getElementById('chapterLabel').classList.add('show');
+    document.getElementById('hint').classList.add('show');
+
+    // First-input dismiss
+    const dismiss = () => {
+      if (!this.introActive) return;
+      this.introActive = false;
+      const card = document.getElementById('introCard');
+      card.classList.add('gone');
+      setTimeout(() => card.classList.remove('show'), 1500);
+      setTimeout(() => document.getElementById('hint').classList.remove('show'), 6500);
+    };
+    this.input.keyboard.once('keydown', dismiss);
+    this.input.once('pointerdown', dismiss);
+
+    // Back to menu
+    document.getElementById('backBtn').onclick = () => location.reload();
+    document.getElementById('backBtn').classList.add('show');
+
+    // Pause on tab blur
+    this.game.events.on('blur', () => this.matter.pause());
+    this.game.events.on('focus', () => this.matter.resume());
+
+    // Resize handler
+    this.scale.on('resize', this.onResize, this);
+
+    // Procedural ambient audio
+    this.startAmbientAudio();
+  }
+
+  /* ----------------------------------------------------------------------
+   * LEVEL — hand-crafted ground segments with pits + cliffs
+   * -------------------------------------------------------------------- */
+  buildLevel() {
+    /*
+     * Each ground segment: { x, w, h, y? (top y of ground) }
+     * Player needs:
+     *   - flat opening section
+     *   - small step up
+     *   - first pit (jumpable)
+     *   - cliff drop (ragdoll if no jump)
+     *   - rising terrain
+     *   - chasm (death zone — falls into void)
+     *   - final ledge
+     */
+    const G = this.groundY;
+    this.groundSegs = [
+      // start area
+      { x: 0,    w: 600,  top: G       },
+      // gap 1 (small jump)
+      { x: 700,  w: 320,  top: G       },
+      // step up
+      { x: 1020, w: 380,  top: G - 40  },
+      // wider gap (need run+jump)
+      { x: 1500, w: 260,  top: G - 40  },
+      // descending terrain
+      { x: 1760, w: 200,  top: G - 20  },
+      { x: 1960, w: 220,  top: G       },
+      // hill
+      { x: 2180, w: 180,  top: G - 30  },
+      { x: 2360, w: 240,  top: G - 60  },
+      // cliff drop into deeper area
+      { x: 2600, w: 600,  top: G + 60  },
+      // ascending again
+      { x: 3220, w: 240,  top: G + 30  },
+      { x: 3460, w: 220,  top: G       },
+      { x: 3680, w: 200,  top: G - 30  },
+      // long jump chasm
+      { x: 4000, w: 240,  top: G - 30  },
+      // final approach
+      { x: 4350, w: 380,  top: G - 50  },
+      { x: 4730, w: 380,  top: G - 80  },
+      { x: 5110, w: 290,  top: G - 110 },
+    ];
+
+    // Build static Matter bodies and visual graphics
+    const groundGfx = this.add.graphics().setDepth(4);
+    groundGfx.fillStyle(0x000000, 1);
+
+    for (const s of this.groundSegs) {
+      // Matter static body
+      const cx = s.x + s.w/2;
+      const cy = s.top + (this.H - s.top)/2;
+      const h  = this.H - s.top + 100;
+      const body = this.matter.add.rectangle(cx, cy, s.w, h, {
+        isStatic: true,
+        friction: 0.4,
+        label: 'ground',
+      });
+
+      // Visual: irregular silhouette top edge (procedural)
+      this.drawGroundTop(groundGfx, s.x, s.top, s.w);
+    }
+
+    // Death zone (below scene)
+    this.deathY = this.H + 500;
+  }
+
+  drawGroundTop(g, x, topY, w) {
+    // Irregular organic top edge with small humps + roots
+    g.beginPath();
+    g.moveTo(x, this.H + 100);
+    g.lineTo(x, topY + 6);
+    const steps = Math.max(6, Math.floor(w / 28));
+    const seedRng = mulberry32(Math.floor(x * 13.7));
+    for (let i = 0; i <= steps; i++) {
+      const px = x + (w * i / steps);
+      const noise = (seedRng() - 0.5) * 6;
+      g.lineTo(px, topY + noise);
+    }
+    g.lineTo(x + w, topY + 6);
+    g.lineTo(x + w, this.H + 100);
+    g.closePath();
+    g.fillPath();
+
+    // Add occasional grass/root tuft on top (tiny black spikes)
+    for (let i = 0; i < Math.floor(w / 110); i++) {
+      const tx = x + 20 + seedRng() * (w - 40);
+      const ty = topY + (seedRng() - 0.5) * 4;
+      g.beginPath();
+      g.moveTo(tx, ty);
+      g.lineTo(tx - 3, ty - 8 - seedRng() * 6);
+      g.lineTo(tx,     ty - 14 - seedRng() * 4);
+      g.lineTo(tx + 3, ty - 9 - seedRng() * 4);
+      g.closePath();
+      g.fillPath();
+    }
+  }
+
+  /* ----------------------------------------------------------------------
+   * PARALLAX — 4 layers of procedural silhouette trees, baked once
+   * -------------------------------------------------------------------- */
+  buildParallax() {
+    const W = this.W, H = this.H;
+
+    // Layer 0: SKY GRADIENT (radial dark teal → black) + faint moon
+    const sky = this.add.graphics().setScrollFactor(0).setDepth(-100);
+    const cx = W * 0.7, cy = H * 0.35;
+    // Multiple concentric circles to fake gradient
+    for (let r = 600; r > 0; r -= 30) {
+      const t = r / 600;
+      const col = Phaser.Display.Color.Interpolate.RGBWithRGB(
+        12, 20, 24,    // outer (near black)
+        38, 70, 78,    // inner (teal)
+        1, 1 - t
+      );
+      const c = (Math.round(col.r) << 16) | (Math.round(col.g) << 8) | Math.round(col.b);
+      sky.fillStyle(c, 1);
+      sky.fillCircle(cx, cy, r);
+    }
+    // Sky base (cover top half if circles don't reach)
+    const base = this.add.graphics().setScrollFactor(0).setDepth(-101);
+    base.fillStyle(0x070d0e, 1).fillRect(0, 0, W, H);
+
+    // Moon
+    const moon = this.add.graphics().setScrollFactor(0.05).setDepth(-99);
+    moon.fillStyle(0xfff4d8, 0.85);
+    moon.fillCircle(W * 0.78, H * 0.22, 38);
+    moon.fillStyle(0xfff4d8, 0.15);
+    moon.fillCircle(W * 0.78, H * 0.22, 80);
+    moon.fillStyle(0xffe4a8, 0.08);
+    moon.fillCircle(W * 0.78, H * 0.22, 140);
+
+    // Layers — generate procedural trees onto a long RenderTexture
+    // Layer A: very far (faint, blue-gray)
+    this.layerA = this.makeTreeLayer({
+      width: 4096, height: H, treeCount: 60, scale:[0.35, 0.55],
+      color: 0x14282b, alpha: 0.8, baseY: H - 220, branchDepth: 3, jagged: false,
+    });
+    // Layer B: far
+    this.layerB = this.makeTreeLayer({
+      width: 4096, height: H, treeCount: 45, scale:[0.55, 0.85],
+      color: 0x09181a, alpha: 0.95, baseY: H - 160, branchDepth: 4, jagged: true,
+    });
+    // Layer C: mid
+    this.layerC = this.makeTreeLayer({
+      width: 4096, height: H, treeCount: 25, scale:[0.85, 1.2],
+      color: 0x040a0b, alpha: 1, baseY: H - 95,  branchDepth: 5, jagged: true,
+    });
+    // Layer D: near foreground (sparse, pure black)
+    this.layerD = this.makeTreeLayer({
+      width: 4096, height: H, treeCount: 12, scale:[1.4, 2.0],
+      color: 0x000000, alpha: 1, baseY: H - 30,  branchDepth: 5, jagged: true,
+    });
+
+    // Place as TileSprites for infinite scrolling
+    this.tileA = this.add.tileSprite(W/2, H/2, W, H, this.layerA.key)
+      .setScrollFactor(0.08, 0.5).setDepth(-50);
+    this.tileB = this.add.tileSprite(W/2, H/2, W, H, this.layerB.key)
+      .setScrollFactor(0.18, 0.7).setDepth(-40);
+    this.tileC = this.add.tileSprite(W/2, H/2, W, H, this.layerC.key)
+      .setScrollFactor(0.42, 1).setDepth(-30);
+    this.tileD = this.add.tileSprite(W/2, H/2, W, H, this.layerD.key)
+      .setScrollFactor(1.25, 1).setDepth(20);
+  }
+
+  makeTreeLayer(opts) {
+    // Use a real <canvas> + 2D context, then register with Phaser textures.
+    // (Phaser RenderTexture creates a DynamicTexture which TileSprite rejects.)
+    const key = `treelayer_${Math.random().toString(36).slice(2,9)}`;
+    const cv = document.createElement('canvas');
+    cv.width = opts.width; cv.height = opts.height;
+    const ctx = cv.getContext('2d');
+    const rng = mulberry32(Math.floor(Math.random() * 1e9));
+
+    const colHex = '#' + opts.color.toString(16).padStart(6, '0');
+    ctx.fillStyle = colHex;
+    ctx.globalAlpha = opts.alpha;
+
+    // Ground silhouette ridge (rolling hill)
+    ctx.beginPath();
+    ctx.moveTo(0, opts.height);
+    ctx.lineTo(0, opts.baseY + 30);
+    const ridgeSteps = Math.floor(opts.width / 60);
+    for (let i = 0; i <= ridgeSteps; i++) {
+      const x = (opts.width * i / ridgeSteps);
+      const y = opts.baseY + Math.sin(i * 0.6 + rng() * 6) * 22 + (rng() - 0.5) * 10;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(opts.width, opts.height);
+    ctx.closePath();
+    ctx.fill();
+
+    // Trees
+    for (let i = 0; i < opts.treeCount; i++) {
+      const tx = rng() * opts.width;
+      const sc = rand(opts.scale[0], opts.scale[1]);
+      const ty = opts.baseY + (rng() - 0.5) * 14;
+      this.drawTree(ctx, tx, ty, sc, opts.branchDepth, opts.jagged, rng);
+    }
+
+    // Register canvas as Phaser texture (TileSprite-compatible)
+    if (this.textures.exists(key)) this.textures.remove(key);
+    this.textures.addCanvas(key, cv);
+    return { key };
+  }
+
+  drawTree(ctx, x, y, scale, maxDepth, jagged, rng) {
+    // Recursive procedural tree silhouette (vanilla canvas2d)
+    const trunkH = (90 + rng() * 70) * scale;
+    const trunkW = (5 + rng() * 4) * scale;
+
+    const drawBranch = (bx, by, len, angle, width, depth) => {
+      if (depth <= 0 || len < 4) return;
+      const ex = bx + Math.cos(angle) * len;
+      const ey = by + Math.sin(angle) * len;
+      const nx = -Math.sin(angle), ny = Math.cos(angle);
+      const w0 = width, w1 = width * 0.55;
+      ctx.beginPath();
+      ctx.moveTo(bx + nx*w0, by + ny*w0);
+      ctx.lineTo(bx - nx*w0, by - ny*w0);
+      ctx.lineTo(ex - nx*w1, ey - ny*w1);
+      ctx.lineTo(ex + nx*w1, ey + ny*w1);
+      ctx.closePath();
+      ctx.fill();
+
+      const branches = (depth >= maxDepth - 1) ? 2 : (rng() < 0.35 ? 3 : 2);
+      for (let b = 0; b < branches; b++) {
+        const aSpread = (jagged ? 0.95 : 0.65);
+        const a2 = angle + rand(-aSpread, aSpread) * (b === 0 ? 1 : -1) - 0.05;
+        const l2 = len * (0.55 + rng() * 0.25);
+        drawBranch(ex, ey, l2, a2, w1 * 0.8, depth - 1);
+      }
+
+      if (depth === 1 && jagged) {
+        for (let l = 0; l < 4; l++) {
+          const lx = ex + (rng() - 0.5) * 10 * scale;
+          const ly = ey + (rng() - 0.5) * 10 * scale;
+          ctx.beginPath();
+          ctx.arc(lx, ly, (3 + rng() * 4) * scale, 0, TAU);
+          ctx.fill();
+        }
+      }
+    };
+
+    drawBranch(x, y, trunkH, -Math.PI / 2 + (rng() - 0.5) * 0.2, trunkW, maxDepth);
+  }
+
+  /* ----------------------------------------------------------------------
+   * ATMOSPHERE — fog, fireflies, lanterns, mist
+   * -------------------------------------------------------------------- */
+  buildAtmosphere() {
+    // FIREFLIES (warm dots that meander + blink)
+    this.fireflies = [];
+    const fGfx = this.add.graphics().setDepth(-5);
+    this.fireflyGfx = fGfx;
+    for (let i = 0; i < 60; i++) {
+      this.fireflies.push({
+        x: rand(0, this.worldEnd),
+        y: rand(this.H * 0.2, this.groundY - 30),
+        vx: rand(-0.2, 0.2),
+        vy: rand(-0.15, 0.15),
+        phase: rand(0, TAU),
+        speed: rand(0.6, 1.4),
+      });
+    }
+
+    // FLOATING LANTERNS (a few big ones in the world)
+    this.lanterns = [];
+    const lanternX = [320, 880, 1640, 2280, 3000, 3550, 4100, 4900];
+    for (const lx of lanternX) {
+      this.lanterns.push({
+        x: lx, y: this.groundY - 180 + rand(-40, 40),
+        baseY: this.groundY - 180 + rand(-40, 40),
+        phase: rand(0, TAU),
+        size: rand(0.8, 1.2),
+      });
+    }
+    this.lanternGfx = this.add.graphics().setDepth(2);
+
+    // FOG — long horizontal drifting strips
+    this.fogStrips = [];
+    for (let i = 0; i < 5; i++) {
+      this.fogStrips.push({
+        y: this.groundY - 30 - i * 15,
+        offset: rand(0, this.worldEnd),
+        speed: rand(8, 20) * (i + 1) * 0.3,
+        alpha: rand(0.04, 0.08),
+        height: rand(40, 70),
+      });
+    }
+    this.fogGfx = this.add.graphics().setDepth(15);
+
+    // MIST PARTICLES (slow vertical floaty dust)
+    this.mistParticles = [];
+    for (let i = 0; i < 80; i++) {
+      this.mistParticles.push({
+        x: rand(0, this.worldEnd),
+        y: rand(this.H * 0.4, this.H),
+        size: rand(0.5, 2.5),
+        vy: -rand(0.05, 0.2),
+        vx: rand(-0.1, 0.1),
+        alpha: rand(0.08, 0.22),
+      });
+    }
+    this.mistGfx = this.add.graphics().setDepth(16);
+  }
+
+  /* ----------------------------------------------------------------------
+   * POST-FX — vignette via Phaser camera FX + warm rim
+   * -------------------------------------------------------------------- */
+  buildPostFX() {
+    // Vignette via camera post-FX (proper radial gradient, GPU-side)
+    try {
+      this.cameras.main.postFX.addVignette(0.5, 0.55, 0.78, 0.55);
+    } catch (e) {
+      // fallback: 4 edge gradients via canvas texture (skip if WebGL unavailable)
+      this.buildVignetteFallback();
+    }
+
+    // Warm overlay (subtle ember tint at bottom — keeps the lantern-glow feel)
+    this.warmOverlay = this.add.graphics().setScrollFactor(0).setDepth(49);
+    const wo = this.warmOverlay;
+    for (let i = 0; i < 18; i++) {
+      const t = i / 18;
+      const a = (1 - t) * 0.06;
+      wo.fillStyle(0xff7a1a, a);
+      wo.fillRect(0, this.H - (i+1) * 20, this.W, 20);
+    }
+  }
+  buildVignetteFallback() {
+    // Canvas2D radial gradient → Phaser texture → image overlay
+    const cv = document.createElement('canvas');
+    cv.width = 512; cv.height = 512;
+    const ctx = cv.getContext('2d');
+    const grd = ctx.createRadialGradient(256, 256, 100, 256, 256, 360);
+    grd.addColorStop(0,    'rgba(0,0,0,0)');
+    grd.addColorStop(0.55, 'rgba(0,0,0,0.18)');
+    grd.addColorStop(1,    'rgba(0,0,0,0.85)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, 512, 512);
+    if (this.textures.exists('vign')) this.textures.remove('vign');
+    this.textures.addCanvas('vign', cv);
+    this.vignImg = this.add.image(this.W/2, this.H/2, 'vign')
+      .setDisplaySize(this.W, this.H)
+      .setScrollFactor(0).setDepth(50);
+  }
+
+  onResize(size) {
+    this.W = size.width; this.H = size.height;
+    this.cameras.main.setSize(size.width, size.height);
+    if (this.tileA) {
+      [this.tileA, this.tileB, this.tileC, this.tileD].forEach(t => {
+        t.setSize(size.width, size.height);
+        t.setPosition(size.width/2, size.height/2);
+      });
+    }
+    if (this.warmOverlay) {
+      this.warmOverlay.clear();
+      for (let i = 0; i < 18; i++) {
+        const t = i / 18, a = (1 - t) * 0.06;
+        this.warmOverlay.fillStyle(0xff7a1a, a);
+        this.warmOverlay.fillRect(0, this.H - (i+1) * 20, this.W, 20);
+      }
+    }
+    if (this.vignImg) this.vignImg.setPosition(this.W/2, this.H/2).setDisplaySize(this.W, this.H);
+  }
+
+  /* ----------------------------------------------------------------------
+   * DEATH / RESPAWN
+   * -------------------------------------------------------------------- */
+  fadeOutAndRespawn() {
+    if (this.respawning) return;
+    this.respawning = true;
+    document.getElementById('deathOverlay').classList.add('on');
+    this.time.delayedCall(1300, () => {
+      this.player.destroy();
+      this.player = new Player(this, this.respawnX, this.groundY - 80);
+      this.cameras.main.startFollow(this.player.followTarget, true, 0.08, 0.05);
+      this.cameras.main.followOffset.set(0, -40);
+      this.time.delayedCall(200, () => {
+        document.getElementById('deathOverlay').classList.remove('on');
+        this.respawning = false;
+      });
+    });
+  }
+
+  onCollide(event) {
+    for (const pair of event.pairs) {
+      const a = pair.bodyA, b = pair.bodyB;
+      // Player ground touch
+      if ((a.label === 'player' && b.label === 'ground') ||
+          (b.label === 'player' && a.label === 'ground')) {
+        if (this.player) this.player.onGround = true;
+      }
+    }
+  }
+
+  /* ----------------------------------------------------------------------
+   * MAIN UPDATE
+   * -------------------------------------------------------------------- */
+  update(time, delta) {
+    if (!this.player) return;
+
+    // Gather input flags
+    const k = this.cursors;
+    const kk = this.keys;
+    const left  = k.left.isDown  || kk.A.isDown || TOUCH.left;
+    const right = k.right.isDown || kk.D.isDown || TOUCH.right;
+    const jump  = k.space.isDown || kk.W.isDown || k.up.isDown || TOUCH.jump;
+    const run   = k.shift.isDown || kk.SHIFT.isDown || TOUCH.run;
+    const dbgRagdoll = kk.F.isDown;
+
+    this.player.input = { left, right, jump, run, ragdoll: dbgRagdoll };
+    this.player.update(delta);
+
+    // Death zone watch
+    if (this.player.y > this.deathY && !this.respawning) {
+      this.fadeOutAndRespawn();
+    }
+    // Win zone
+    if (this.player.x > this.worldEnd - 80 && !this.win) {
+      this.win = true;
+      this.showEndCard();
+    }
+
+    this.updateAtmosphere(delta);
+  }
+
+  updateAtmosphere(delta) {
+    const dt = delta / 1000;
+    const camX = this.cameras.main.scrollX;
+    const camY = this.cameras.main.scrollY;
+    const visL = camX - 100, visR = camX + this.W + 100;
+
+    // Fireflies
+    const fg = this.fireflyGfx;
+    fg.clear();
+    for (const f of this.fireflies) {
+      f.phase += dt * f.speed;
+      f.x += f.vx + Math.cos(f.phase) * 0.4;
+      f.y += f.vy + Math.sin(f.phase * 1.3) * 0.3;
+      // gently re-anchor
+      if (f.x < camX - 200) f.x = camX + this.W + rand(0, 300);
+      if (f.x > camX + this.W + 200) f.x = camX - rand(0, 300);
+      if (f.y < this.H * 0.15) f.y = this.H * 0.15;
+      if (f.y > this.groundY - 20) f.y = this.groundY - 20;
+      const blink = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(f.phase * 2.7));
+      fg.fillStyle(0xffd28a, 0.45 * blink);
+      fg.fillCircle(f.x, f.y, 2.4);
+      fg.fillStyle(0xffe4b0, 0.95 * blink);
+      fg.fillCircle(f.x, f.y, 0.9);
+    }
+
+    // Lanterns
+    const lg = this.lanternGfx;
+    lg.clear();
+    for (const L of this.lanterns) {
+      L.phase += dt * 0.6;
+      L.y = L.baseY + Math.sin(L.phase) * 8;
+      if (L.x < visL - 200 || L.x > visR + 200) continue;
+      // glow halo
+      lg.fillStyle(0xff7a1a, 0.10);
+      lg.fillCircle(L.x, L.y, 56 * L.size);
+      lg.fillStyle(0xff8a30, 0.18);
+      lg.fillCircle(L.x, L.y, 32 * L.size);
+      lg.fillStyle(0xffb05a, 0.55);
+      lg.fillCircle(L.x, L.y, 14 * L.size);
+      lg.fillStyle(0xfff5d8, 0.95);
+      lg.fillCircle(L.x, L.y - 1, 6 * L.size);
+      // hanging string
+      lg.lineStyle(1, 0xffb05a, 0.25);
+      lg.beginPath();
+      lg.moveTo(L.x, L.y - 14 * L.size);
+      lg.lineTo(L.x, L.y - 60 * L.size);
+      lg.strokePath();
+    }
+
+    // Fog strips
+    const ff = this.fogGfx;
+    ff.clear();
+    for (const s of this.fogStrips) {
+      s.offset = (s.offset + s.speed * dt) % this.worldEnd;
+      const sx = s.offset - camX * 0.6;
+      ff.fillStyle(0xc8e0d8, s.alpha);
+      // tile the strip across the visible area
+      for (let x = sx % 600 - 600; x < this.W + 600; x += 600) {
+        ff.fillRect(x, s.y, 600, s.height);
+      }
+    }
+
+    // Mist particles
+    const mg = this.mistGfx;
+    mg.clear();
+    for (const p of this.mistParticles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.y < this.H * 0.3) { p.y = this.H; p.x = camX + rand(0, this.W); }
+      if (p.x < camX - 200 || p.x > camX + this.W + 200) continue;
+      mg.fillStyle(0xc8e0d8, p.alpha);
+      mg.fillCircle(p.x, p.y, p.size);
+    }
+  }
+
+  showEndCard() {
+    // Simple end-of-chapter screen
+    const overlay = this.add.graphics().setScrollFactor(0).setDepth(80);
+    overlay.fillStyle(0x000000, 0).fillRect(0, 0, this.W, this.H);
+    this.tweens.add({
+      targets: overlay,
+      alpha: 1, duration: 1800, ease: 'Sine.inOut',
+      onUpdate: t => { overlay.clear(); overlay.fillStyle(0x000000, t.progress).fillRect(0, 0, this.W, this.H); },
+      onComplete: () => {
+        const txt = this.add.text(this.W/2, this.H/2 - 40, 'จบบทที่ ๑', {
+          fontFamily: 'Charm, serif', fontSize: '64px', color: '#e9dfc7',
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(82);
+        const sub = this.add.text(this.W/2, this.H/2 + 30, 'TO BE CONTINUED · บทที่ ๒ — เดินตามแสง', {
+          fontFamily: 'Cinzel, serif', fontSize: '12px', color: '#ffb05a',
+          letterSpacing: 8,
+        }).setOrigin(0.5).setScrollFactor(0).setDepth(82);
+        sub.setLetterSpacing(8);
+      },
+    });
+  }
+
+  /* ----------------------------------------------------------------------
+   * 8-BIT CHIPTUNE AUDIO — NES-style: pulse + triangle + noise
+   * -------------------------------------------------------------------- */
+  startAmbientAudio() {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.audio = new ChiptuneAudio(new AC());
+      const start = () => {
+        this.audio.start();
+        window.removeEventListener('keydown', start);
+        window.removeEventListener('pointerdown', start);
+      };
+      window.addEventListener('keydown', start, { once: true });
+      window.addEventListener('pointerdown', start, { once: true });
+    } catch (e) { console.warn('audio init failed', e); }
+  }
+
+  sfx(name) {
+    if (this.audio && this.audio.started) this.audio[name]?.();
+  }
+}
+
+/* ============================================================================
+ * CHIPTUNE AUDIO ENGINE — square + triangle + noise (NES inspired)
+ * ========================================================================= */
+class ChiptuneAudio {
+  constructor(ac) {
+    this.ac = ac;
+    this.started = false;
+    // master bus
+    this.master = ac.createGain(); this.master.gain.value = 0.42;
+    this.master.connect(ac.destination);
+    // music + sfx sub-busses
+    this.musicG = ac.createGain(); this.musicG.gain.value = 0.55;
+    this.sfxG   = ac.createGain(); this.sfxG.gain.value   = 0.85;
+    this.musicG.connect(this.master);
+    this.sfxG.connect(this.master);
+
+    // a touch of warmth on music: low-pass at 4kHz
+    this.musicLP = ac.createBiquadFilter();
+    this.musicLP.type = 'lowpass';
+    this.musicLP.frequency.value = 4200;
+    this.musicLP.Q.value = 0.5;
+    this.musicG.disconnect(); this.musicG.connect(this.musicLP).connect(this.master);
+
+    // pre-built noise buffer for SFX
+    const nb = ac.createBuffer(1, ac.sampleRate * 1.0, ac.sampleRate);
+    const nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    this.noiseBuf = nb;
+
+    // NEXT-bar scheduler state
+    this.barIdx = 0;
+    this.nextBarTime = 0;
+  }
+
+  start() {
+    if (this.started) return;
+    if (this.ac.state === 'suspended') this.ac.resume();
+    this.started = true;
+    this.nextBarTime = this.ac.currentTime + 0.1;
+    this.tick();
+  }
+
+  /* ---------- low-level helpers ---------- */
+  pulseNote(freq, dur, when, vol=0.18, type='square', duty=0.5) {
+    const osc = this.ac.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, when);
+    const g = this.ac.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(vol, when + 0.006);
+    g.gain.linearRampToValueAtTime(vol * 0.7, when + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    osc.connect(g).connect(this.musicG);
+    osc.start(when);
+    osc.stop(when + dur + 0.05);
+  }
+
+  triNote(freq, dur, when, vol=0.22) {
+    this.pulseNote(freq, dur, when, vol, 'triangle');
+  }
+
+  noiseHit(when, dur, vol=0.18, hp=300, lp=4000) {
+    const src = this.ac.createBufferSource();
+    src.buffer = this.noiseBuf;
+    const hpf = this.ac.createBiquadFilter(); hpf.type = 'highpass'; hpf.frequency.value = hp;
+    const lpf = this.ac.createBiquadFilter(); lpf.type = 'lowpass';  lpf.frequency.value = lp;
+    const g = this.ac.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(vol, when + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    src.connect(hpf).connect(lpf).connect(g).connect(this.sfxG);
+    src.start(when);
+    src.stop(when + dur + 0.02);
+  }
+
+  /* ---------- music sequencer ---------- */
+  tick() {
+    if (!this.started) return;
+    // schedule a few bars ahead so audio stays smooth
+    const lookAhead = 0.6;
+    while (this.nextBarTime < this.ac.currentTime + lookAhead) {
+      this.scheduleBar(this.nextBarTime, this.barIdx);
+      const BPM = 86;
+      const beatSec = 60 / BPM;
+      this.nextBarTime += beatSec * 4;
+      this.barIdx++;
+    }
+    setTimeout(() => this.tick(), 200);
+  }
+
+  scheduleBar(t, idx) {
+    // Key: A natural minor (A C D E F G)
+    // Pitches (Hz)
+    const A2 = 110.00, E3 = 164.81, A3 = 220.00, C4 = 261.63;
+    const D4 = 293.66, E4 = 329.63, F4 = 349.23, G4 = 392.00;
+    const A4 = 440.00, C5 = 523.25, D5 = 587.33, E5 = 659.25;
+    const BPM = 86, b = 60 / BPM;
+
+    const bar = idx % 8;
+    // Bass — slow plodding root motion (heartbeat)
+    const bassPattern = [
+      [A2, A2, E3, A2],
+      [A2, A2, E3, A2],
+      [A2, A2, F4, E3],  // F4 too high — let me fix: use F3
+      [A2, A2, E3, E3],
+      [A2, A2, E3, A2],
+      [A2, A2, F4, E3],
+      [A2, A3, E3, A2],
+      [A2, A2, E3, A2],
+    ];
+    // Replace stray F4 (typo) with F3 (174.61)
+    const F3 = 174.61;
+    const correctedBass = [
+      [A2, A2, E3, A2],
+      [A2, A2, E3, A2],
+      [A2, A2, F3, E3],
+      [A2, A2, E3, E3],
+      [A2, A2, E3, A2],
+      [A2, A2, F3, E3],
+      [A2, A3, E3, A2],
+      [A2, A2, E3, A2],
+    ];
+    const bassRow = correctedBass[bar];
+    for (let i = 0; i < 4; i++) {
+      this.triNote(bassRow[i], b * 0.9, t + i * b, 0.22);
+    }
+
+    // Lead (sparse haunting melody — only some bars)
+    const melodyByBar = {
+      0: [{at:0,    n:A4, d:1.5}, {at:2.0, n:C5, d:1.0}],
+      1: [{at:0,    n:E4, d:1.0}, {at:1.5, n:G4, d:1.0}, {at:3.0, n:A4, d:0.8}],
+      2: [{at:0.5,  n:F4, d:1.5}, {at:2.5, n:E4, d:1.0}],
+      3: [{at:0,    n:E5, d:1.0}, {at:1.5, n:D5, d:1.0}, {at:3.0, n:C5, d:0.8}],
+      4: [{at:0,    n:A4, d:2.0}, {at:2.5, n:E4, d:1.0}],
+      5: [{at:0,    n:G4, d:1.0}, {at:1.5, n:E4, d:0.8}, {at:2.5, n:A4, d:1.0}],
+      6: [{at:0,    n:C5, d:1.5}, {at:2.0, n:A4, d:1.5}],
+      // bar 7 = silent (let it breathe)
+    };
+    const mel = melodyByBar[bar];
+    if (mel) {
+      for (const note of mel) {
+        this.pulseNote(note.n, note.d * b, t + note.at * b, 0.11, 'square');
+        // tiny echo (NES "stereo" trick)
+        this.pulseNote(note.n, note.d * b * 0.5, t + note.at * b + 0.06, 0.04, 'square');
+      }
+    }
+
+    // Soft noise hi-hat — every other bar, on offbeats
+    if (bar % 2 === 0) {
+      for (let i = 0; i < 4; i++) {
+        this.noiseHit(t + i * b + b * 0.5, 0.05, 0.04, 6000, 9000);
+      }
+    }
+
+    // Distant wind sweep (bandpass noise, every 4 bars)
+    if (bar === 0 || bar === 4) {
+      const dur = b * 4;
+      const src = this.ac.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+      const bp = this.ac.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(400, t);
+      bp.frequency.linearRampToValueAtTime(900, t + dur * 0.5);
+      bp.frequency.linearRampToValueAtTime(300, t + dur);
+      bp.Q.value = 0.6;
+      const g = this.ac.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(0.05, t + dur * 0.3);
+      g.gain.linearRampToValueAtTime(0, t + dur);
+      src.connect(bp).connect(g).connect(this.musicG);
+      src.start(t); src.stop(t + dur + 0.1);
+    }
+  }
+
+  /* ---------- SFX (called on player events) ---------- */
+  jump() {
+    const t = this.ac.currentTime;
+    const o = this.ac.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(220, t);
+    o.frequency.exponentialRampToValueAtTime(880, t + 0.16);
+    const g = this.ac.createGain();
+    g.gain.setValueAtTime(0.18, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    o.connect(g).connect(this.sfxG);
+    o.start(t); o.stop(t + 0.2);
+  }
+  land() {
+    const t = this.ac.currentTime;
+    // pitch thump
+    const o = this.ac.createOscillator(); o.type = 'square';
+    o.frequency.setValueAtTime(180, t);
+    o.frequency.exponentialRampToValueAtTime(70, t + 0.13);
+    const g = this.ac.createGain();
+    g.gain.setValueAtTime(0.16, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    o.connect(g).connect(this.sfxG);
+    o.start(t); o.stop(t + 0.22);
+    // soft noise dust
+    this.noiseHit(t, 0.12, 0.10, 200, 2200);
+  }
+  step() {
+    const t = this.ac.currentTime;
+    this.noiseHit(t, 0.04, 0.06, 700, 2400);
+  }
+  ragdoll() {
+    const t = this.ac.currentTime;
+    // descending arpeggio (death sting)
+    const notes = [659.25, 523.25, 392.00, 329.63, 261.63, 196.00];
+    notes.forEach((n, i) => {
+      this.pulseNote(n, 0.18, t + i * 0.06, 0.16, 'square');
+    });
+    // low boom
+    const o = this.ac.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(80, t);
+    o.frequency.exponentialRampToValueAtTime(40, t + 0.7);
+    const g = this.ac.createGain();
+    g.gain.setValueAtTime(0.22, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.8);
+    o.connect(g).connect(this.sfxG);
+    o.start(t); o.stop(t + 0.85);
+  }
+  lanternPing() {
+    const t = this.ac.currentTime;
+    const o = this.ac.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(880, t);
+    const g = this.ac.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.08, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    o.connect(g).connect(this.sfxG);
+    o.start(t); o.stop(t + 0.65);
+  }
+}
+
+/* ============================================================================
+ * PLAYER — Limbo-style silhouette with skeletal ragdoll
+ * ========================================================================= */
+class Player {
+  constructor(scene, x, y) {
+    this.scene = scene;
+    this.matter = scene.matter;
+    this.x = x; this.y = y;
+    this.facing = 1;
+    this.walkPhase = 0;
+    this.input = { left:false, right:false, jump:false, run:false, ragdoll:false };
+    this.onGround = false;
+    this.airTime = 0;
+    this.speedX = 0;
+    this.fallVel = 0;
+    this.ragdolled = false;
+    this.alive = true;
+
+    // ---- Physics body (capsule for normal mode) ----
+    this.capsule = this.matter.add.rectangle(x, y, 16, 60, {
+      chamfer: { radius: 8 },
+      friction: 0.2,
+      frictionAir: 0.01,
+      mass: 4,
+      label: 'player',
+      inertia: Infinity,
+    });
+
+    // Camera follow target — invisible sprite that we move smoothly to capsule center
+    this.followTarget = scene.add.zone(x, y, 1, 1);
+    scene.physics?.world?.enable?.(this.followTarget);
+
+    // ---- Visuals ----
+    this.gfx = scene.add.graphics().setDepth(10);
+    this.lanternGlow = scene.add.graphics().setDepth(9);
+
+    // ---- Hair (Verlet) ----
+    // BACK strands are long (extend past pelvis so they're visible flowing behind).
+    // SIDE strands are mid-length (frame the face/shoulders).
+    // CROWN wisps are short (whispy top hair).
+    // Drawn BEHIND body in render order — only the parts beyond body silhouette show.
+    this.hair = [
+      new HairStrand(14, 84, -8, -10, 2.8), // long back-of-head strand → flows past pelvis
+      new HairStrand(12, 70, -6, -5, 2.3),  // back centre — second long strand
+      new HairStrand(10, 50, -11, -1, 1.9), // left side bang
+      new HairStrand(10, 50,  9, -1, 1.9),  // right side bang
+      new HairStrand(7,  26, -3, -13, 1.5), // top crown wisp left
+      new HairStrand(7,  26,  4, -13, 1.5), // top crown wisp right
+    ];
+    this.hair.forEach(s => s.anchor(x, y - 40));
+  }
+
+  destroy() {
+    if (this.capsule) this.matter.world.remove(this.capsule);
+    if (this.bodies) {
+      Object.values(this.bodies).forEach(b => this.matter.world.remove(b));
+      this.joints.forEach(j => this.matter.world.removeConstraint(j));
+    }
+    this.gfx.destroy();
+    this.lanternGlow.destroy();
+    this.followTarget.destroy();
+  }
+
+  update(delta) {
+    const dt = delta / 1000;
+
+    if (this.ragdolled) {
+      this.updateRagdoll(dt);
+      this.draw();
+      return;
+    }
+
+    // Debug ragdoll trigger
+    if (this.input.ragdoll && !this.ragdollDebugLast) {
+      this.triggerRagdoll({ x: 8, y: -6 });
+      this.ragdollDebugLast = true;
+      return;
+    }
+    this.ragdollDebugLast = this.input.ragdoll;
+
+    // ---- Movement ----
+    const targetSpeed = (this.input.left ? -1 : 0) + (this.input.right ? 1 : 0);
+    const maxSpeed = this.input.run ? 6.0 : 3.4;
+    this.speedX += (targetSpeed * maxSpeed - this.speedX) * 0.18;
+    M.Body.setVelocity(this.capsule, { x: this.speedX, y: this.capsule.velocity.y });
+
+    if (targetSpeed !== 0) this.facing = targetSpeed;
+
+    // ---- Jump ----
+    if (this.input.jump && this.onGround && !this.jumpHeld) {
+      M.Body.setVelocity(this.capsule, { x: this.capsule.velocity.x, y: -10.5 });
+      this.onGround = false;
+      this.jumpHeld = true;
+      this.scene.sfx('jump');
+    }
+    if (!this.input.jump) this.jumpHeld = false;
+
+    // air time tracking (for fall ragdoll)
+    if (!this.onGround) {
+      this.airTime += dt;
+    } else {
+      // Detect hard landing → ragdoll
+      const fallV = this.capsule.velocity.y;
+      if (this.airTime > 0.65 && fallV > 8) {
+        this.triggerRagdoll({ x: this.capsule.velocity.x * 0.5, y: 0 });
+        return;
+      }
+      // Land SFX (only when actually fell, not just standing still)
+      if (this.airTime > 0.18) this.scene.sfx('land');
+      this.airTime = 0;
+    }
+
+    // After velocity update, ground flag resets next collision (collisionend would clear)
+    // We use a simpler heuristic: if y velocity is near zero and we haven't moved up, we're grounded.
+
+    // walk phase + footstep SFX on each step zero-crossing
+    const moving = Math.abs(this.speedX) > 0.4;
+    const prevPhase = this.walkPhase;
+    if (moving) {
+      this.walkPhase += dt * (this.input.run ? 14 : 9) * Math.min(1, Math.abs(this.speedX) / maxSpeed);
+    } else {
+      this.walkPhase += dt * 1.4;
+    }
+    // detect a foot hitting the ground (sin crosses 0 going downward, modulo PI)
+    if (moving && this.onGround) {
+      const a = Math.floor(prevPhase / Math.PI);
+      const b = Math.floor(this.walkPhase / Math.PI);
+      if (b !== a) this.scene.sfx('step');
+    }
+
+    // sync canonical pose centre
+    this.x = this.capsule.position.x;
+    this.y = this.capsule.position.y;
+
+    // camera follow target
+    this.followTarget.x = this.x + this.facing * 30;
+    this.followTarget.y = this.y;
+
+    // hair — anchored on crown; flows down via verlet, trails behind on movement
+    const head = { x: this.x + this.facing * 1, y: this.y - 32 };
+    // wind = opposite to motion direction → hair trails behind player
+    const windX = -this.speedX * 0.18;
+    this.hair.forEach((s, i) => {
+      const ax = head.x + s.offsetX * this.facing;
+      const ay = head.y + s.offsetY;
+      s.anchor(ax, ay);
+      s.step(dt, 2.2, windX);
+    });
+
+    this.draw();
+  }
+
+  /* ----------------- RAGDOLL ----------------- */
+  triggerRagdoll(impact) {
+    if (this.ragdolled) return;
+    this.ragdolled = true;
+    this.scene.sfx('ragdoll');
+    const x = this.x, y = this.y;
+    const m = this.matter;
+
+    // Free capsule
+    this.matter.world.remove(this.capsule);
+
+    // 11 bones
+    const opt = { frictionAir: 0.02, friction: 0.3 };
+    this.bodies = {
+      head:   m.add.circle   (x,    y-32, 11,           {...opt, mass:0.7}),
+      torso:  m.add.rectangle(x,    y-8,  18, 30,       {...opt, mass:1.4}),
+      pelvis: m.add.rectangle(x,    y+15, 22, 12,       {...opt, mass:0.9}),
+      armLU:  m.add.rectangle(x-12, y-8,  6,  20,       {...opt, mass:0.28}),
+      armLL:  m.add.rectangle(x-14, y+12, 5,  22,       {...opt, mass:0.22}),
+      armRU:  m.add.rectangle(x+12, y-8,  6,  20,       {...opt, mass:0.28}),
+      armRL:  m.add.rectangle(x+14, y+12, 5,  22,       {...opt, mass:0.22}),
+      legLU:  m.add.rectangle(x-5,  y+30, 8,  22,       {...opt, mass:0.55}),
+      legLL:  m.add.rectangle(x-5,  y+54, 7,  22,       {...opt, mass:0.45}),
+      legRU:  m.add.rectangle(x+5,  y+30, 8,  22,       {...opt, mass:0.55}),
+      legRL:  m.add.rectangle(x+5,  y+54, 7,  22,       {...opt, mass:0.45}),
+    };
+
+    // Bones don't collide with each other (negative collision group)
+    Object.values(this.bodies).forEach(b => {
+      b.collisionFilter.group = -100;
+    });
+
+    // Constraints (joints)
+    const J = (a, ax, ay, b, bx, by, stiffness=0.85) =>
+      this.matter.add.constraint(a, b, 0, stiffness, {
+        pointA: { x:ax, y:ay }, pointB: { x:bx, y:by },
+      });
+
+    this.joints = [
+      J(this.bodies.torso,  0, -15, this.bodies.head,   0,  10),
+      J(this.bodies.torso,  0,  15, this.bodies.pelvis, 0,  -6),
+      J(this.bodies.torso, -8, -12, this.bodies.armLU,  0, -10),
+      J(this.bodies.torso,  8, -12, this.bodies.armRU,  0, -10),
+      J(this.bodies.armLU,  0,  10, this.bodies.armLL,  0, -10),
+      J(this.bodies.armRU,  0,  10, this.bodies.armRL,  0, -10),
+      J(this.bodies.pelvis,-7,   6, this.bodies.legLU,  0, -10),
+      J(this.bodies.pelvis, 7,   6, this.bodies.legRU,  0, -10),
+      J(this.bodies.legLU,  0,  10, this.bodies.legLL,  0, -10),
+      J(this.bodies.legRU,  0,  10, this.bodies.legRL,  0, -10),
+    ];
+
+    // Apply impact impulse
+    if (impact) {
+      const F = 0.04;
+      M.Body.applyForce(this.bodies.torso, this.bodies.torso.position, {
+        x: impact.x * F, y: impact.y * F - 0.02,
+      });
+      M.Body.setAngularVelocity(this.bodies.torso, (Math.random() - 0.5) * 0.3);
+    }
+
+    // Camera follow torso
+    this.followTarget = this.scene.add.zone(x, y, 1, 1);
+    this.scene.cameras.main.startFollow(this.followTarget, true, 0.12, 0.08);
+
+    // After 2.2 sec → fade & respawn
+    this.scene.time.delayedCall(2200, () => this.scene.fadeOutAndRespawn());
+  }
+
+  updateRagdoll(dt) {
+    // sync hair to head body
+    const head = this.bodies.head;
+    const ang = head.angle;
+    this.hair.forEach((s, i) => {
+      const ox = Math.cos(ang) * s.offsetX - Math.sin(ang) * s.offsetY;
+      const oy = Math.sin(ang) * s.offsetX + Math.cos(ang) * s.offsetY;
+      s.anchor(head.position.x + ox * 0.3, head.position.y + oy * 0.3);
+      s.step(dt, 1.5);
+    });
+
+    this.x = this.bodies.torso.position.x;
+    this.y = this.bodies.torso.position.y;
+    this.followTarget.x = this.x;
+    this.followTarget.y = this.y;
+  }
+
+  /* ----------------- DRAW ----------------- */
+  draw() {
+    const g = this.gfx;
+    g.clear();
+
+    // 1) Hair FIRST (behind body — strands trail behind shoulders)
+    this.drawHair(g);
+
+    // 2) Body silhouette ON TOP of hair (covers any front-facing strands)
+    g.fillStyle(0x000000, 1);
+    if (this.ragdolled) {
+      this.drawRagdoll(g);
+    } else {
+      this.drawWalking(g);
+    }
+  }
+
+  drawWalking(g) {
+    const x = this.x, y = this.y;
+    const f = this.facing;
+    const phase = this.walkPhase;
+    const moving = Math.abs(this.speedX) > 0.4;
+
+    // walk-cycle parameters
+    const stepAmp = moving ? (this.input.run ? 16 : 12) : 0;
+    const liftAmp = moving ? (this.input.run ? 9 : 6)   : 0;
+    const armAmp  = moving ? (this.input.run ? 14 : 10) : 4;
+    const bobAmp  = moving ? (this.input.run ? 3.5 : 2.2) : 0.8;
+
+    const legAphase = phase;
+    const legBphase = phase + Math.PI;
+    const legAfwd  = Math.sin(legAphase) * stepAmp;
+    const legBfwd  = Math.sin(legBphase) * stepAmp;
+    const legAlift = Math.max(0, Math.cos(legAphase)) * liftAmp;
+    const legBlift = Math.max(0, Math.cos(legBphase)) * liftAmp;
+
+    const armAfwd = Math.sin(legAphase + Math.PI) * armAmp;
+    const armBfwd = Math.sin(legBphase + Math.PI) * armAmp;
+
+    const bob = Math.abs(Math.sin(phase * 2)) * bobAmp - bobAmp * 0.5;
+    const tilt = (this.speedX / 6) * 0.05;
+
+    // ---- Legs (drawn first, behind torso) ----
+    this.drawLeg(g, x - 3, y + 12,   x - 3 + legBfwd * f * 0.4, y + 24,   x - 3 + legBfwd * f, y + 36 - legBlift);
+    this.drawLeg(g, x + 3, y + 12,   x + 3 + legAfwd * f * 0.4, y + 24,   x + 3 + legAfwd * f, y + 36 - legAlift);
+
+    // ---- Pelvis lump ----
+    g.fillRoundedRect(x - 9, y + 8, 18, 10, 4);
+
+    // ---- Torso ----
+    g.save();
+    g.translateCanvas(x, y - bob);
+    g.rotateCanvas(tilt);
+    // trapezoidal torso (narrower at bottom)
+    g.beginPath();
+    g.moveTo(-9, -22);
+    g.lineTo(9, -22);
+    g.lineTo(11, 8);
+    g.lineTo(-11, 8);
+    g.closePath();
+    g.fillPath();
+    // dress flare (skirt) — Limbo + Thai costume hint
+    g.beginPath();
+    g.moveTo(-11, 8);
+    g.lineTo(11, 8);
+    g.lineTo(13, 18);
+    g.lineTo(-13, 18);
+    g.closePath();
+    g.fillPath();
+    g.restore();
+
+    // ---- Arms ----
+    const torsoTopY = y - bob - 22;
+    const sLY = y - bob - 18;
+    const sRY = y - bob - 18;
+    this.drawArm(g, x - 9, sLY,   x - 9 + armBfwd * f * 0.4, y - 6,   x - 9 + armBfwd * f, y + 6);
+    this.drawArm(g, x + 9, sRY,   x + 9 + armAfwd * f * 0.4, y - 6,   x + 9 + armAfwd * f, y + 6);
+
+    // ---- Lantern in front hand (right hand if facing right) ----
+    const lh = (f === 1) ? { x: x + 9 + armAfwd, y: y + 6 } : { x: x - 9 + armBfwd * -1, y: y + 6 };
+    this.drawLantern(lh.x, lh.y);
+
+    // ---- Head ----
+    const headX = x;
+    const headY = y - bob - 32;
+    g.fillCircle(headX, headY, 11);
+    // small jaw line bump (a tiny Limbo-style chin notch)
+    g.fillCircle(headX + f * 4, headY + 5, 4);
+
+    // ---- Eyes (glowing RED — Limbo + Thai folk-horror style) ----
+    // Tuned for camera zoom 1.75 — keep dots tight, soft halo
+    // outer halo
+    g.fillStyle(0xff0000, 0.16);
+    g.fillCircle(headX + f * 3, headY - 1, 4.5);
+    g.fillCircle(headX - f * 2, headY - 1, 4.0);
+    // mid glow
+    g.fillStyle(0xff2424, 0.45);
+    g.fillCircle(headX + f * 3, headY - 1, 2.4);
+    g.fillCircle(headX - f * 2, headY - 1, 2.1);
+    // bright red core
+    g.fillStyle(0xff1a1a, 1);
+    g.fillCircle(headX + f * 3, headY - 1, 1.4);
+    g.fillCircle(headX - f * 2, headY - 1, 1.2);
+    // tiny inner highlight (gives the eye a "wet" / hot look)
+    g.fillStyle(0xffe0a0, 0.95);
+    g.fillCircle(headX + f * 3, headY - 1.2, 0.5);
+    g.fillCircle(headX - f * 2, headY - 1.2, 0.45);
+    g.fillStyle(0x000000, 1);
+  }
+
+  drawRagdoll(g) {
+    g.fillStyle(0x000000, 1);
+    this.drawBoneRect(g, this.bodies.torso,  18, 30, 7);
+    this.drawBoneRect(g, this.bodies.pelvis, 22, 12, 5);
+    this.drawBoneRect(g, this.bodies.armLU,   6, 20, 3);
+    this.drawBoneRect(g, this.bodies.armLL,   5, 22, 3);
+    this.drawBoneRect(g, this.bodies.armRU,   6, 20, 3);
+    this.drawBoneRect(g, this.bodies.armRL,   5, 22, 3);
+    this.drawBoneRect(g, this.bodies.legLU,   8, 22, 4);
+    this.drawBoneRect(g, this.bodies.legLL,   7, 22, 3);
+    this.drawBoneRect(g, this.bodies.legRU,   8, 22, 4);
+    this.drawBoneRect(g, this.bodies.legRL,   7, 22, 3);
+    // head as circle
+    const hb = this.bodies.head;
+    g.fillCircle(hb.position.x, hb.position.y, 11);
+    // eyes (red, follow head rotation)
+    const ang = hb.angle;
+    const cosA = Math.cos(ang), sinA = Math.sin(ang);
+    const eye = (lx, ly, cr) => {
+      const ex = hb.position.x + lx * cosA - ly * sinA;
+      const ey = hb.position.y + lx * sinA + ly * cosA;
+      g.fillStyle(0xff0000, 0.16); g.fillCircle(ex, ey, 4.5);
+      g.fillStyle(0xff2424, 0.45); g.fillCircle(ex, ey, 2.4);
+      g.fillStyle(0xff1a1a, 1);    g.fillCircle(ex, ey, cr);
+      g.fillStyle(0xffe0a0, 0.95); g.fillCircle(ex, ey - 0.3, 0.5);
+    };
+    eye( 3, -1, 1.4);
+    eye(-2, -1, 1.2);
+    g.fillStyle(0x000000, 1);
+  }
+
+  drawBoneRect(g, body, w, h, r) {
+    g.save();
+    g.translateCanvas(body.position.x, body.position.y);
+    g.rotateCanvas(body.angle);
+    g.fillRoundedRect(-w/2, -h/2, w, h, r);
+    g.restore();
+  }
+
+  drawLeg(g, x0, y0, x1, y1, x2, y2) {
+    // Quadratic-ish leg silhouette: thigh + shin, joined at knee
+    g.fillStyle(0x000000, 1);
+    g.beginPath();
+    // thigh (slightly thicker at top)
+    g.fillRoundedRect(0, 0, 0, 0); // noop placeholder
+    // We approximate two segments with rotated rectangles via path
+    // Thigh
+    this.drawTaperedSegment(g, x0, y0, x1, y1, 5.5, 4.5);
+    // Shin
+    this.drawTaperedSegment(g, x1, y1, x2, y2, 4.5, 3.6);
+    // foot
+    g.fillCircle(x2, y2, 3.4);
+  }
+
+  drawArm(g, x0, y0, x1, y1, x2, y2) {
+    g.fillStyle(0x000000, 1);
+    this.drawTaperedSegment(g, x0, y0, x1, y1, 4.0, 3.2);
+    this.drawTaperedSegment(g, x1, y1, x2, y2, 3.4, 2.8);
+    g.fillCircle(x2, y2, 2.6); // hand
+  }
+
+  drawTaperedSegment(g, x1, y1, x2, y2, w1, w2) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const L = Math.sqrt(dx*dx + dy*dy) || 0.001;
+    const nx = -dy / L, ny = dx / L;
+    g.beginPath();
+    g.moveTo(x1 + nx * w1, y1 + ny * w1);
+    g.lineTo(x1 - nx * w1, y1 - ny * w1);
+    g.lineTo(x2 - nx * w2, y2 - ny * w2);
+    g.lineTo(x2 + nx * w2, y2 + ny * w2);
+    g.closePath();
+    g.fillPath();
+  }
+
+  drawLantern(x, y) {
+    const lg = this.lanternGlow;
+    lg.clear();
+    // big halo
+    lg.fillStyle(0xff7a1a, 0.10);
+    lg.fillCircle(x, y, 80);
+    lg.fillStyle(0xff8a30, 0.18);
+    lg.fillCircle(x, y, 42);
+    lg.fillStyle(0xffb05a, 0.55);
+    lg.fillCircle(x, y, 16);
+    lg.fillStyle(0xfff5d8, 0.95);
+    lg.fillCircle(x, y - 1, 7);
+
+    // Lantern body (small black silhouette)
+    const g = this.gfx;
+    g.fillStyle(0x000000, 1);
+    g.fillRoundedRect(x - 4, y - 6, 8, 12, 2);
+    g.fillRect(x - 5, y - 7, 10, 1.5);
+    // hanging string up to hand
+    g.lineStyle(1, 0x000000, 1);
+    g.beginPath();
+    g.moveTo(x, y - 7);
+    g.lineTo(x, y - 14);
+    g.strokePath();
+  }
+
+  drawHair(g) {
+    // Glow underlay
+    for (const s of this.hair) {
+      g.lineStyle(7, 0xfff5e0, 0.18);
+      g.beginPath();
+      s.points.forEach((p, i) => {
+        if (i === 0) g.moveTo(p.x, p.y);
+        else g.lineTo(p.x, p.y);
+      });
+      g.strokePath();
+    }
+    // Hair core (white/bone)
+    for (const s of this.hair) {
+      g.lineStyle(s.thickness, 0xfff8e8, 1);
+      g.beginPath();
+      s.points.forEach((p, i) => {
+        if (i === 0) g.moveTo(p.x, p.y);
+        else g.lineTo(p.x, p.y);
+      });
+      g.strokePath();
+    }
+    // Small white tip dots (gives painterly feel)
+    for (const s of this.hair) {
+      const last = s.points[s.points.length - 1];
+      g.fillStyle(0xfff8e8, 1);
+      g.fillCircle(last.x, last.y, s.thickness * 0.7);
+    }
+  }
+}
+
+/* ============================================================================
+ * GAME INIT
+ * ========================================================================= */
+const game = new Phaser.Game({
+  type: Phaser.WEBGL,
+  width: window.innerWidth,
+  height: window.innerHeight,
+  parent: 'game',
+  backgroundColor: '#000000',
+  scale: {
+    mode: Phaser.Scale.RESIZE,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+  },
+  physics: {
+    default: 'matter',
+    matter: {
+      gravity: { y: 1.0 },
+      debug: false,
+      enableSleeping: false,
+    },
+  },
+  scene: [BootScene, GameScene],
+  fps: { target: 60, forceSetTimeOut: false },
+  render: { pixelArt: false, antialias: true, roundPixels: false },
+});
+
+/* expose for devtools */
+window.game = game;
+
+/* Start button → reveal game */
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('menu').classList.add('gone');
+  setTimeout(() => document.getElementById('menu').remove(), 1200);
+});
+
+/* Keyboard fallback to skip menu */
+window.addEventListener('keydown', (e) => {
+  const m = document.getElementById('menu');
+  if (m && !m.classList.contains('gone') && (e.key === 'Enter' || e.key === ' ')) {
+    document.getElementById('startBtn').click();
+  }
+}, { once: false });
+</script>
+</body>
+</html>
