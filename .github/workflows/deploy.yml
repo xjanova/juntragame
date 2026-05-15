@@ -1,0 +1,102 @@
+name: Deploy juntragame to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'production' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check required secrets
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SSH_HOST" ] || [ -z "$SSH_USER" ] || [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::error::Required deployment secrets are not configured."
+            echo "Required: SSH_HOST, SSH_USER, SSH_PRIVATE_KEY (org-level secrets are inherited)"
+            exit 1
+          fi
+          if [ -z "${{ vars.DEPLOY_PATH }}" ]; then
+            echo "::error::Repo variable DEPLOY_PATH is not set."
+            echo "Set it to e.g. /home/admin/domains/xn--82c4af5bzdj.online/public_html/game"
+            exit 1
+          fi
+          echo "✅ Secrets + DEPLOY_PATH configured"
+
+      - name: Deploy via SSH (run deploy.sh on server)
+        uses: appleboy/ssh-action@v1
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          command_timeout: 5m
+          envs: DEPLOY_DIR
+          script: |
+            echo "🚀 Starting juntragame deployment..."
+            echo "Deploy path: $DEPLOY_DIR"
+
+            cd "$DEPLOY_DIR" || {
+              echo "❌ Cannot cd to $DEPLOY_DIR"
+              echo "Did you run the one-time setup? See README — git clone into this path first."
+              exit 1
+            }
+
+            if [ -f deploy.sh ]; then
+              chmod +x deploy.sh
+              bash deploy.sh main
+            else
+              echo "❌ deploy.sh not found in $DEPLOY_DIR"
+              echo "Did you git clone the repo into this path?"
+              exit 1
+            fi
+
+            echo "✅ Deployment completed!"
+
+      - name: Health check
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          echo "Waiting 5s for deployment to settle..."
+          sleep 5
+          if [ -z "$APP_URL" ]; then
+            echo "⚠️ APP_URL variable not set, skipping health check"
+            exit 0
+          fi
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -L "$APP_URL" --max-time 30 || echo "000")
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "✅ Game is live (HTTP $HTTP_CODE) at $APP_URL"
+          else
+            echo "⚠️ Health check returned HTTP $HTTP_CODE"
+          fi
+
+      - name: Deployment summary
+        if: always()
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "## ✅ juntragame deployed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Deployment failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** $APP_URL" >> $GITHUB_STEP_SUMMARY
