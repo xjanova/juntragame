@@ -210,6 +210,89 @@ function mulberry32(seed) {
   };
 }
 
+/* ============================================================================
+ * FOG NOISE — value noise + FBM (fractional brownian motion)
+ *
+ * value noise: hash-based lattice noise (cheaper than perlin, similar look).
+ * fbm: stack 5–6 octaves, each at 2× freq + ½ amp → cloudy "natural" pattern.
+ * Used by bakeFogTexture() to write a tileable cloud texture into a canvas
+ * once at boot. After that the fog is rendered as a TileSprite (GPU-cheap).
+ * ========================================================================= */
+function _hash2(ix, iy, seed) {
+  let h = (ix * 374761393) ^ (iy * 668265263) ^ (seed * 2147483647);
+  h = (h ^ (h >>> 13)) * 1274126177;
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h / 4294967296;          // 0..1
+}
+function _smooth(t) { return t * t * (3 - 2 * t); }
+function valueNoise2D(x, y, seed) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = x - ix, fy = y - iy;
+  const u = _smooth(fx), v = _smooth(fy);
+  const a = _hash2(ix,     iy,     seed);
+  const b = _hash2(ix + 1, iy,     seed);
+  const c = _hash2(ix,     iy + 1, seed);
+  const d = _hash2(ix + 1, iy + 1, seed);
+  return (1 - u) * (1 - v) * a + u * (1 - v) * b
+       + (1 - u) *      v  * c + u *      v  * d;
+}
+function fbm(x, y, octaves, seed) {
+  let v = 0, amp = 0.5, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    v += amp * valueNoise2D(x * freq, y * freq, seed + i * 17);
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return v;                       // ~0..1 (loose)
+}
+
+/* Bake a tileable fog texture into a canvas + register with Phaser textures.
+ * - W, H: texture size (256–768 typical; bigger = smoother but slower bake)
+ * - opts.scale: noise frequency (smaller = bigger cloud puffs)
+ * - opts.density: alpha multiplier
+ * - opts.color: [r, g, b] base fog color (0–255)
+ * - opts.topFade: top of texture fades to transparent (1=full, 0=off)
+ * - opts.threshold: lower = more fog coverage; higher = wispy gaps
+ * Returns the texture key. */
+function bakeFogTexture(scene, key, W, H, seed, opts = {}) {
+  const scale     = opts.scale     ?? 0.012;
+  const density   = opts.density   ?? 1.0;
+  const color     = opts.color     ?? [200, 220, 215];
+  const topFade   = opts.topFade   ?? 1.0;
+  const threshold = opts.threshold ?? 0.40;
+  const octaves   = opts.octaves   ?? 5;
+  const [r, g, b] = color;
+
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(W, H);
+  const d = img.data;
+
+  for (let y = 0; y < H; y++) {
+    // Top-fade: less fog up high (sky), more low (near ground).
+    const fade = topFade > 0 ? Math.min(1, (y / H) * (1 + topFade)) : 1;
+    for (let x = 0; x < W; x++) {
+      // Domain-warp the input slightly for "swirl" (cheap turbulence).
+      const wx = x + 12 * fbm(x * scale * 0.6, y * scale * 0.6, 2, seed + 999);
+      const wy = y + 12 * fbm(x * scale * 0.6, y * scale * 0.6, 2, seed + 333);
+      const n  = fbm(wx * scale, wy * scale, octaves, seed);
+      // Soft threshold: clamp to [0..1] then ease.
+      let a = (n - threshold) * 1.7;
+      a = Math.max(0, Math.min(1, a));
+      a = a * a * (3 - 2 * a);    // ease for softer edges
+      a = a * fade * density;
+      const i = (y * W + x) * 4;
+      d[i]   = r; d[i+1] = g; d[i+2] = b;
+      d[i+3] = (a * 255) | 0;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  if (scene.textures.exists(key)) scene.textures.remove(key);
+  scene.textures.addCanvas(key, cv);
+  return key;
+}
+
 /* ---------- Touch input ---------- */
 const TOUCH = { left:false, right:false, jump:false, run:false };
 function bindTouch() {
@@ -660,32 +743,89 @@ class GameScene extends Phaser.Scene {
     }
     this.lanternGfx = this.add.graphics().setDepth(2);
 
-    // FOG — long horizontal drifting strips
-    this.fogStrips = [];
-    for (let i = 0; i < 5; i++) {
-      this.fogStrips.push({
-        y: this.groundY - 30 - i * 15,
-        offset: rand(0, this.worldEnd),
-        speed: rand(8, 20) * (i + 1) * 0.3,
-        alpha: rand(0.04, 0.08),
-        height: rand(40, 70),
-      });
-    }
-    this.fogGfx = this.add.graphics().setDepth(15);
+    // ----------------------------------------------------------------
+    // FOG — 4 layered FBM noise textures + 1 light-scatter overlay
+    //
+    // Each layer = a tileable cloud texture pre-baked at boot, drawn as
+    // TileSprite that scrolls horizontally via tilePositionX. Layers differ
+    // by:
+    //   - density (back layers thinner, front layers thicker bands)
+    //   - cloud scale (back = bigger puffs, front = wispier detail)
+    //   - drift speed (independent per layer = parallax depth)
+    //   - vertical position + height (back covers more sky, front hugs ground)
+    // ----------------------------------------------------------------
+    this.fogLayers = this._buildFogLayers();
 
-    // MIST PARTICLES (slow vertical floaty dust)
+    // ----------------------------------------------------------------
+    // SOFT MIST PARTICLES — clustered radial-gradient blobs (soft cloud puffs)
+    // Replaces the old pointillism dust. Worley-style clustering: spawn in
+    // groups of 3–6 around a seed point so they read as cloud wisps, not dots.
+    // ----------------------------------------------------------------
     this.mistParticles = [];
-    for (let i = 0; i < 80; i++) {
-      this.mistParticles.push({
-        x: rand(0, this.worldEnd),
-        y: rand(this.H * 0.4, this.H),
-        size: rand(0.5, 2.5),
-        vy: -rand(0.05, 0.2),
-        vx: rand(-0.1, 0.1),
-        alpha: rand(0.08, 0.22),
-      });
+    const clusters = 18;            // ~ 18 clusters × 5 puffs = 90 puffs
+    for (let c = 0; c < clusters; c++) {
+      const cx = rand(0, this.worldEnd);
+      const cy = rand(this.H * 0.45, this.groundY - 20);
+      const groupSize = irand(3, 7);
+      for (let i = 0; i < groupSize; i++) {
+        this.mistParticles.push({
+          x: cx + rand(-60, 60),
+          y: cy + rand(-25, 25),
+          size: rand(14, 36),       // BIG soft puffs (was 0.5–2.5px dots)
+          vy: -rand(0.04, 0.16),
+          vx: rand(-0.08, 0.08),
+          alpha: rand(0.06, 0.13),
+          phase: rand(0, TAU),
+          phaseSpeed: rand(0.3, 0.7),
+        });
+      }
     }
     this.mistGfx = this.add.graphics().setDepth(16);
+
+    // ----------------------------------------------------------------
+    // FOG LIGHT SCATTER — warm radial glows painted on top of fog layers
+    // where lanterns + player lantern sit. Uses ADD blend so it brightens
+    // the underlying cool fog tint into a warm halo (Mie scattering look).
+    // ----------------------------------------------------------------
+    this.fogLightGfx = this.add.graphics().setDepth(17).setBlendMode(Phaser.BlendModes.ADD);
+  }
+
+  /* Build 4 fog layers with pre-baked FBM textures + TileSprites.
+   * Returns array of { tile, baseAlpha, driftPxSec, scrollFactor }. */
+  _buildFogLayers() {
+    const W = 512, H = 256;          // texture size — power-of-2 tileable
+    const layers = [
+      // BACK — high in scene, thin haze, big puffs, slow drift, far parallax
+      { key:'fog_back',  texOpts:{scale:0.008, threshold:0.42, density:0.85, color:[180,205,210], topFade:0.4, octaves:5},
+        depth:-12, scrollFactor:0.18, baseAlpha:0.55, yFrac:0.18, hFrac:0.55, driftPxSec: 7,  tint:0xa9c3c8 },
+      // MID-BACK — medium puffs, mid sky → ground
+      { key:'fog_midb',  texOpts:{scale:0.013, threshold:0.45, density:0.95, color:[195,215,212], topFade:0.6, octaves:5},
+        depth:14,  scrollFactor:0.45, baseAlpha:0.62, yFrac:0.30, hFrac:0.55, driftPxSec: 13, tint:0xb6cdd0 },
+      // MID-FRONT — wispy bands hugging mid-ground
+      { key:'fog_midf',  texOpts:{scale:0.018, threshold:0.50, density:1.0,  color:[210,225,222], topFade:0.7, octaves:6},
+        depth:18,  scrollFactor:0.85, baseAlpha:0.55, yFrac:0.42, hFrac:0.50, driftPxSec: 22, tint:0xcdddda },
+      // FRONT — thick low-lying ground fog, fastest drift = "moving past" feel
+      { key:'fog_front', texOpts:{scale:0.022, threshold:0.48, density:1.05, color:[220,232,228], topFade:0.85,octaves:6},
+        depth:22,  scrollFactor:1.15, baseAlpha:0.50, yFrac:0.58, hFrac:0.45, driftPxSec: 36, tint:0xdee9e5 },
+    ];
+
+    const out = [];
+    for (let i = 0; i < layers.length; i++) {
+      const L = layers[i];
+      bakeFogTexture(this, L.key, W, H, 1000 + i * 113, L.texOpts);
+      const yPx = this.H * L.yFrac;
+      const hPx = this.H * L.hFrac;
+      const tile = this.add.tileSprite(this.W / 2, yPx + hPx / 2, this.W, hPx, L.key)
+        .setScrollFactor(L.scrollFactor, 0.9)
+        .setDepth(L.depth)
+        .setAlpha(L.baseAlpha)
+        .setTint(L.tint);
+      out.push({
+        tile, key: L.key, baseAlpha: L.baseAlpha, driftPxSec: L.driftPxSec,
+        scrollFactor: L.scrollFactor, yFrac: L.yFrac, hFrac: L.hFrac, tint: L.tint,
+      });
+    }
+    return out;
   }
 
   /* ----------------------------------------------------------------------
@@ -746,6 +886,7 @@ class GameScene extends Phaser.Scene {
       }
     }
     if (this.vignImg) this.vignImg.setPosition(this.W/2, this.H/2).setDisplaySize(this.W, this.H);
+    this._resizeFog(size.width, size.height);
   }
 
   /* ----------------------------------------------------------------------
@@ -916,29 +1057,81 @@ class GameScene extends Phaser.Scene {
       lg.strokePath();
     }
 
-    // Fog strips
-    const ff = this.fogGfx;
-    ff.clear();
-    for (const s of this.fogStrips) {
-      s.offset = (s.offset + s.speed * dt) % this.worldEnd;
-      const sx = s.offset - camX * 0.6;
-      ff.fillStyle(0xc8e0d8, s.alpha);
-      // tile the strip across the visible area
-      for (let x = sx % 600 - 600; x < this.W + 600; x += 600) {
-        ff.fillRect(x, s.y, 600, s.height);
+    // -------- FOG LAYERS — drift via tilePositionX (GPU-cheap) --------
+    // Each layer scrolls horizontally at its own pace = looks like wind blowing
+    // through fog at varying depths.
+    if (this.fogLayers) {
+      for (const L of this.fogLayers) {
+        L.tile.tilePositionX += L.driftPxSec * dt;
+        // Subtle vertical breath so layers don't feel "frozen" vertically
+        L.tile.tilePositionY = Math.sin(this.time.now * 0.0003 + L.driftPxSec) * 8;
       }
     }
 
-    // Mist particles
+    // -------- SOFT MIST PARTICLES — radial-gradient blobs --------
     const mg = this.mistGfx;
     mg.clear();
+    const dtMist = dt;
     for (const p of this.mistParticles) {
-      p.x += p.vx;
+      p.phase += dtMist * p.phaseSpeed;
+      // Slow upward drift + sinusoidal sway so puffs "swim"
+      p.x += p.vx + Math.sin(p.phase) * 0.15;
       p.y += p.vy;
-      if (p.y < this.H * 0.3) { p.y = this.H; p.x = camX + rand(0, this.W); }
-      if (p.x < camX - 200 || p.x > camX + this.W + 200) continue;
-      mg.fillStyle(0xc8e0d8, p.alpha);
-      mg.fillCircle(p.x, p.y, p.size);
+      if (p.y < this.H * 0.30) { p.y = this.H + 20; p.x = camX + rand(-this.W * 0.3, this.W * 1.3); }
+      if (p.x < visL - 100 || p.x > visR + 100) continue;
+      // 3 concentric soft circles ≈ radial gradient in pure Graphics
+      const sizeBreath = 1 + Math.sin(p.phase * 0.7) * 0.06;
+      const r = p.size * sizeBreath;
+      mg.fillStyle(0xc8e0d8, p.alpha * 0.35);
+      mg.fillCircle(p.x, p.y, r * 1.0);
+      mg.fillStyle(0xd6e8e0, p.alpha * 0.55);
+      mg.fillCircle(p.x, p.y, r * 0.62);
+      mg.fillStyle(0xe5f0e8, p.alpha * 0.85);
+      mg.fillCircle(p.x, p.y, r * 0.30);
+    }
+
+    // -------- FOG LIGHT SCATTERING — warm glows where lanterns sit --------
+    // Mie/Rayleigh scattering approximation: paint warm radial gradients ON
+    // TOP of fog with ADDITIVE blend → fog brightens to warm orange near
+    // lanterns + player lantern. World-space coords (no scrollFactor).
+    const flg = this.fogLightGfx;
+    flg.clear();
+
+    const drawScatter = (x, y, intensity = 1, radius = 180) => {
+      // Outer halo (very soft)
+      flg.fillStyle(0xff7a1a, 0.04 * intensity);
+      flg.fillCircle(x, y, radius * 1.0);
+      flg.fillStyle(0xff8a30, 0.08 * intensity);
+      flg.fillCircle(x, y, radius * 0.7);
+      flg.fillStyle(0xffb05a, 0.13 * intensity);
+      flg.fillCircle(x, y, radius * 0.42);
+      flg.fillStyle(0xffe4a8, 0.18 * intensity);
+      flg.fillCircle(x, y, radius * 0.22);
+    };
+
+    // Ambient lanterns
+    for (const L of this.lanterns) {
+      if (L.x < visL - 220 || L.x > visR + 220) continue;
+      drawScatter(L.x, L.y, L.size, 200 * L.size);
+    }
+    // Player's hand lantern → strong scatter (the moving "bubble of light")
+    if (this.player && this.player.alive) {
+      const px = this.player.x + this.player.facing * 8;
+      const py = this.player.y + 8;
+      // Pulse subtly so it feels alive, not static
+      const pulse = 0.85 + Math.sin(this.time.now * 0.003) * 0.08;
+      drawScatter(px, py, 1.4 * pulse, 230);
+    }
+  }
+
+  /* Resize handler addendum: re-fit fog tile sprites to new viewport. */
+  _resizeFog(w, h) {
+    if (!this.fogLayers) return;
+    for (const L of this.fogLayers) {
+      const yPx = h * L.yFrac;
+      const hPx = h * L.hFrac;
+      L.tile.setSize(w, hPx);
+      L.tile.setPosition(w / 2, yPx + hPx / 2);
     }
   }
 
